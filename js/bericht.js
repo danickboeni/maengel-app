@@ -4,6 +4,7 @@ import * as db from './db.js';
 import { DRINGLICHKEIT, ERLEDIGT_FARBE, istErledigt, dringlichkeit, maengelSortieren } from './konstanten.js';
 import { weltPixel, kachelUrl, KACHEL_CACHE } from './karte.js';
 import { dateiDatum } from './sicherung.js';
+import { FORM_FARBE, MESS_NAME, beschriftungsPunkt, messText, zahlText } from './messen.js';
 
 // jsPDF erst laden, wenn ein Bericht erstellt wird
 let jsPdfVersprechen = null;
@@ -46,20 +47,22 @@ async function kachelBild(url) {
   return createImageBitmap(blob);
 }
 
-async function planZeichnen(platz, punkte, B = 1400, H = 1000) {
+// formen: gemessene Flächen/Linien/Punkte der Offerte [{ messung, nr }]
+async function planZeichnen(platz, punkte, B = 1400, H = 1000, formen = []) {
   const canvas = document.createElement('canvas');
   canvas.width = B; canvas.height = H;
   const g = canvas.getContext('2d');
   g.fillStyle = '#dfe5e2';
   g.fillRect(0, 0, B, H);
 
-  const lats = [platz.lat, ...punkte.map((p) => p.lat)];
-  const lngs = [platz.lng, ...punkte.map((p) => p.lng)];
+  const formPunkte = formen.flatMap((f) => f.messung.punkte);
+  const lats = [platz.lat, ...punkte.map((p) => p.lat), ...formPunkte.map((p) => p[0])];
+  const lngs = [platz.lng, ...punkte.map((p) => p.lng), ...formPunkte.map((p) => p[1])];
   const nord = Math.max(...lats); const sued = Math.min(...lats);
   const west = Math.min(...lngs); const ost = Math.max(...lngs);
   const rand = 110;
   // Grösste Zoomstufe, bei der alle Punkte Platz haben (bei wenigen Punkten nicht zu nah)
-  let z = punkte.length > 1 ? 20 : 19;
+  let z = punkte.length + formPunkte.length > 1 ? 20 : 19;
   for (; z > 12; z -= 1) {
     const a = weltPixel(nord, west, z);
     const b = weltPixel(sued, ost, z);
@@ -84,6 +87,41 @@ async function planZeichnen(platz, punkte, B = 1400, H = 1000) {
       fehlend += 1;
     }
   }));
+
+  // Gemessene Formen der Offerte
+  const px = (p) => { const w = weltPixel(p[0], p[1], z); return [w.x - x0, w.y - y0]; };
+  for (const { messung } of formen) {
+    const farbe = FORM_FARBE[messung.typ] || '#455a64';
+    const xy = messung.punkte.map(px);
+    g.lineJoin = 'round';
+    if (messung.typ === 'flaeche' && xy.length >= 3) {
+      g.beginPath();
+      xy.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+      g.closePath();
+      g.globalAlpha = 0.28; g.fillStyle = farbe; g.fill();
+      g.globalAlpha = 1; g.lineWidth = 5; g.strokeStyle = farbe; g.stroke();
+    } else if (messung.typ === 'linie' && xy.length >= 2) {
+      g.beginPath();
+      xy.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+      g.lineWidth = 9; g.strokeStyle = '#fff'; g.stroke();
+      g.lineWidth = 5; g.strokeStyle = farbe; g.stroke();
+    } else {
+      for (const [x, y] of xy) {
+        g.beginPath(); g.arc(x, y, 11, 0, Math.PI * 2);
+        g.fillStyle = farbe; g.fill(); g.lineWidth = 4; g.strokeStyle = '#fff'; g.stroke();
+      }
+    }
+  }
+  for (const { messung, nr } of formen) {
+    const [x, y] = px(beschriftungsPunkt(messung));
+    g.beginPath(); g.arc(x, y, 22, 0, Math.PI * 2);
+    g.fillStyle = '#fff'; g.fill();
+    g.lineWidth = 5; g.strokeStyle = FORM_FARBE[messung.typ] || '#455a64'; g.stroke();
+    g.fillStyle = '#1b1f1d';
+    g.font = 'bold 24px Helvetica, Arial, sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(String(nr), x, y + 1);
+  }
 
   // Punkte: hohe Nummern zuerst, damit Nr. 1 oben liegt
   for (const p of [...punkte].reverse()) {
@@ -315,4 +353,194 @@ export async function berichtErstellen(platz, { auswahl = 'offen', mitFotos = tr
   meldung('PDF wird gespeichert …');
   const blob = doc.output('blob');
   return { datei: new File([blob], dateiname(platz), { type: 'application/pdf' }), anzahl: liste.length, seiten, planFehlend: plan.fehlend };
+}
+
+// ---------- PDF «Aufnahme für Offerte» ----------
+
+function offerteDateiname(offerte) {
+  const name = offerte.titel
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue')
+    .replace(/Ä/g, 'Ae').replace(/Ö/g, 'Oe').replace(/Ü/g, 'Ue')
+    .replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '')
+    .slice(0, 40) || 'Offerte';
+  return `Aufnahme_Offerte_${name}_${dateiDatum()}.pdf`;
+}
+
+function mengeText(p) {
+  if (p.einheit === 'pauschal') return 'pauschal';
+  if (p.menge == null || p.menge === '') return '–';
+  return `${zahlText(p.menge)} ${p.einheit || ''}`.trim();
+}
+
+export async function offerteBerichtErstellen(offerte, { mitFotos = true, meldung = () => {} } = {}) {
+  meldung('PDF-Baustein wird geladen …');
+  const JsPdf = await jsPdfLaden();
+  const positionen = await db.positionenVonOfferte(offerte.id);
+  const doc = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+  doc.setProperties({ title: `Aufnahme für Offerte ${offerte.titel}`, creator: 'Mängel-App Sportplatz' });
+  const L = 15; const R = 195; const BREITE = R - L; const UNTEN = 280;
+  let y = 18;
+  const grau = () => doc.setTextColor(90, 102, 96);
+  const schwarz = () => doc.setTextColor(27, 31, 29);
+  function neueSeite() { doc.addPage(); y = 18; }
+  function platzFuer(h) { if (y + h > UNTEN) neueSeite(); }
+
+  // --- Kopf ---
+  schwarz();
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(20);
+  doc.text('Aufnahme für Offerte', L, y);
+  y += 9;
+  doc.setFontSize(14);
+  const titelZeilen = doc.splitTextToSize(offerte.titel, BREITE);
+  doc.text(titelZeilen, L, y);
+  y += titelZeilen.length * 6 + 2;
+
+  // Kunde und Angaben in zwei Spalten
+  const k = offerte.kunde || {};
+  const links = [
+    ['Auftraggeber', k.firma], ['Ansprechperson', k.person], ['Telefon', k.telefon], ['E-Mail', k.email],
+  ].filter(([, w]) => w);
+  const rechts = [
+    ['Ort', offerte.ort], ['Begehung', offerte.datum ? datum(offerte.datum) : ''],
+    ['Stand', datum(new Date().toISOString(), true)], ['Positionen', String(positionen.length)],
+  ].filter(([, w]) => w);
+  doc.setFontSize(10);
+  const zeileH = 5;
+  const spalte = (eintraege, x, breite) => {
+    let yy = y;
+    for (const [titel, wert] of eintraege) {
+      doc.setFont('helvetica', 'normal'); grau();
+      doc.text(titel, x, yy);
+      doc.setFont('helvetica', 'bold'); schwarz();
+      const z = doc.splitTextToSize(String(wert), breite - 30);
+      doc.text(z, x + 30, yy);
+      yy += Math.max(1, z.length) * zeileH;
+    }
+    return yy;
+  };
+  y = Math.max(spalte(links, L, 92), spalte(rechts, L + 95, 85)) + 2;
+  if (offerte.notiz) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); grau();
+    const z = doc.splitTextToSize(`Notiz: ${offerte.notiz}`, BREITE);
+    doc.text(z, L, y);
+    y += z.length * 4.6 + 2;
+  }
+  y += 4;
+
+  // --- Plan ---
+  meldung('Plan wird gezeichnet …');
+  const formen = positionen.map((p, i) => ({ messung: p.messung, nr: i + 1 })).filter((f) => f.messung && f.messung.punkte.length);
+  const plan = await planZeichnen(offerte, [], 1400, 1000, formen);
+  const planH = BREITE * plan.seitenverhaeltnis;
+  if (y + planH > UNTEN - 10) neueSeite();
+  doc.addImage(plan.bild, 'JPEG', L, y, BREITE, planH, 'plan', 'NONE');
+  doc.setDrawColor(200, 206, 203); doc.rect(L, y, BREITE, planH);
+  y += planH + 4;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); grau();
+  doc.text(`Luftbild © swisstopo${plan.fehlend ? ` – ${plan.fehlend} von ${plan.gesamt} Kartenteilen nicht verfügbar (offline?)` : ''}. Messungen ab Luftbild, Genauigkeit etwa 1–2 %.`, L, y);
+  y += 10;
+
+  // --- Positionsliste ---
+  const spalten = [
+    { titel: 'Nr.', b: 10 }, { titel: 'Art', b: 34 }, { titel: 'Menge', b: 26 }, { titel: 'Beschreibung', b: 110 },
+  ];
+  function tabellenKopf() {
+    doc.setFillColor(231, 236, 233);
+    doc.rect(L, y - 4.5, BREITE, 7, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); schwarz();
+    let x = L + 1.5;
+    for (const s of spalten) { doc.text(s.titel, x, y); x += s.b; }
+    y += 6;
+    doc.setFont('helvetica', 'normal');
+  }
+  platzFuer(20);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12); schwarz();
+  doc.text('Positionen', L, y);
+  y += 7;
+  if (!positionen.length) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); grau();
+    doc.text('Noch keine Positionen erfasst.', L, y);
+    y += 8;
+  } else {
+    tabellenKopf();
+    doc.setFontSize(9);
+    positionen.forEach((p, i) => {
+      // Gemessener Wert nur zusätzlich nennen, wenn die Menge von Hand abweicht
+      const gemessen = p.messung ? messText(p.messung) : '';
+      const zusatz = gemessen && gemessen !== mengeText(p) ? `${MESS_NAME[p.messung.typ]} gemessen: ${gemessen}` : '';
+      const beschreibung = [p.beschreibung, zusatz].filter(Boolean).join(' – ') || '–';
+      const zellen = [String(i + 1), p.art, mengeText(p), beschreibung].map((t, j) => doc.splitTextToSize(t, spalten[j].b - 3));
+      const h = Math.max(...zellen.map((z) => z.length)) * 3.9 + 2.5;
+      if (y + h > UNTEN) { neueSeite(); tabellenKopf(); doc.setFontSize(9); }
+      let x = L + 1.5;
+      zellen.forEach((z, j) => {
+        doc.setFont('helvetica', j === 2 ? 'bold' : 'normal'); schwarz();
+        doc.text(z, x, y);
+        x += spalten[j].b;
+      });
+      doc.setDrawColor(225, 230, 227);
+      doc.line(L, y + h - 4, R, y + h - 4);
+      y += h;
+    });
+  }
+
+  // --- Positionen mit Fotos ---
+  const mitBildern = mitFotos ? positionen.map((p, i) => ({ p, nr: i + 1 })).filter(({ p }) => (p.fotoIds || []).length) : [];
+  if (mitBildern.length) {
+    neueSeite();
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); schwarz();
+    doc.text('Fotos zu den Positionen', L, y);
+    y += 8;
+    let zaehler = 0;
+    for (const { p, nr } of mitBildern) {
+      zaehler += 1;
+      meldung(`Fotos werden eingefügt (${zaehler}/${mitBildern.length}) …`);
+      const fotos = (await Promise.all(p.fotoIds.map((id) => db.holen('fotos', id)))).filter(Boolean);
+      if (!fotos.length) continue;
+      const bB = (BREITE - 6) / 2;
+      const maxH = 75;
+      const masse = fotos.map((f) => {
+        const v = (f.hoehe || 3) / (f.breite || 4);
+        let b = bB; let h = b * v;
+        if (h > maxH) { h = maxH; b = h / v; }
+        return { b, h };
+      });
+      // Kopf der Position zusammen mit der ersten Bildreihe halten
+      const ersteReihe = Math.max(...masse.slice(0, 2).map((m) => m.h));
+      platzFuer(12 + ersteReihe);
+      const farbe = p.messung ? FORM_FARBE[p.messung.typ] : '#78909c';
+      doc.setFillColor(farbe);
+      doc.circle(L + 3.2, y - 1.3, 3.2, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor('#ffffff');
+      doc.text(String(nr), L + 3.2, y - 0.2, { align: 'center' });
+      doc.setFontSize(12); schwarz();
+      doc.text(`${p.art} – ${mengeText(p)}`, L + 9, y);
+      y += 4;
+      for (let i = 0; i < fotos.length; i += 2) {
+        const reihe = masse.slice(i, i + 2);
+        const h = Math.max(...reihe.map((m) => m.h));
+        platzFuer(h + 4);
+        reihe.forEach((m, j) => {
+          const f = fotos[i + j];
+          doc.addImage(new Uint8Array(f.daten), 'JPEG', L + j * (bB + 6), y, m.b, m.h, `foto-${f.id}`, 'NONE');
+        });
+        y += h + 4;
+      }
+      doc.setDrawColor(225, 230, 227);
+      doc.line(L, y, R, y);
+      y += 8;
+    }
+  }
+
+  // --- Fusszeile ---
+  const seiten = doc.getNumberOfPages();
+  for (let s = 1; s <= seiten; s += 1) {
+    doc.setPage(s);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); grau();
+    doc.text(`Aufnahme für Offerte · ${offerte.titel}`.slice(0, 90), L, 290);
+    doc.text(`Seite ${s} von ${seiten}`, R, 290, { align: 'right' });
+  }
+  meldung('PDF wird gespeichert …');
+  const blob = doc.output('blob');
+  return { datei: new File([blob], offerteDateiname(offerte), { type: 'application/pdf' }), anzahl: positionen.length, seiten, planFehlend: plan.fehlend };
 }

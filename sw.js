@@ -2,7 +2,7 @@
 // und Luftbild-Kacheln von swisstopo für den Einsatz ohne Empfang.
 // Bei jeder Änderung an App-Dateien VERSION erhöhen.
 
-const VERSION = 'maengel-v3';
+const VERSION = 'maengel-v4';
 const KACHELN = 'kacheln-v1';       // gleicher Name wie in js/karte.js
 const MAX_KACHELN = 6000;           // etwa 100–120 MB
 const DATEIEN = [
@@ -17,6 +17,7 @@ const DATEIEN = [
   'js/konstanten.js',
   'js/sicherung.js',
   'js/bericht.js',
+  'js/messen.js',
   'vendor/leaflet-1.9.4/leaflet.css',
   'vendor/leaflet-1.9.4/leaflet.js',
   'vendor/leaflet-1.9.4/images/layers.png',

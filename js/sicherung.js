@@ -1,7 +1,8 @@
 // Sicherung: alle Daten mit Fotos als eine Datei exportieren und wieder einlesen.
 import * as db from './db.js';
 
-const FORMAT = 1;
+// Format 1: Plätze und Mängel. Format 2: zusätzlich Offerten und Positionen.
+const FORMAT = 2;
 const TAG = 24 * 60 * 60 * 1000;
 export const ERINNERUNG_TAGE = 7;
 
@@ -47,9 +48,11 @@ export function dateiDatum(d = new Date()) {
 
 // Erstellt die Sicherungsdatei. Die Fotos werden einzeln angehängt, damit nie ein riesiger Text im Speicher liegt.
 export async function sicherungErstellen(fortschritt = () => {}) {
-  const [plaetze, maengel, fotoIds] = await Promise.all([db.alle('plaetze'), db.alle('maengel'), db.schluessel('fotos')]);
+  const [plaetze, maengel, offerten, positionen, fotoIds] = await Promise.all([
+    db.alle('plaetze'), db.alle('maengel'), db.alle('offerten'), db.alle('positionen'), db.schluessel('fotos'),
+  ]);
   const teile = [];
-  const kopf = { app: 'maengelapp', format: FORMAT, erstellt: new Date().toISOString(), plaetze, maengel };
+  const kopf = { app: 'maengelapp', format: FORMAT, erstellt: new Date().toISOString(), plaetze, maengel, offerten, positionen };
   teile.push(JSON.stringify(kopf).slice(0, -1), ',"fotos":[');
   let i = 0;
   for (const id of fotoIds) {
@@ -64,7 +67,10 @@ export async function sicherungErstellen(fortschritt = () => {}) {
   teile.push(']}');
   const blob = new Blob(teile, { type: 'application/json' });
   const name = `maengel-sicherung-${dateiDatum()}.json`;
-  return { datei: new File([blob], name, { type: 'application/json' }), plaetze: plaetze.length, maengel: maengel.length, fotos: i };
+  return {
+    datei: new File([blob], name, { type: 'application/json' }),
+    plaetze: plaetze.length, maengel: maengel.length, offerten: offerten.length, fotos: i,
+  };
 }
 
 // Teilt die Datei (Handy) oder lädt sie herunter (PC). Liefert true, wenn sie weitergegeben wurde.
@@ -108,7 +114,9 @@ export async function sicherungPruefen(datei) {
     throw new Error('Diese Datei ist keine Sicherung der Mängel-App.');
   }
   if (daten.format > FORMAT) throw new Error('Diese Sicherung stammt aus einer neueren Version der App. Bitte zuerst die App aktualisieren.');
-  const [plaetze, maengel] = await Promise.all([db.alle('plaetze'), db.alle('maengel')]);
+  daten.offerten = Array.isArray(daten.offerten) ? daten.offerten : [];
+  daten.positionen = Array.isArray(daten.positionen) ? daten.positionen : [];
+  const [plaetze, maengel, offerten] = await Promise.all([db.alle('plaetze'), db.alle('maengel'), db.alle('offerten')]);
   const vorhanden = (liste) => new Map(liste.map((x) => [x.id, x]));
   function vergleich(neu, alt) {
     const map = vorhanden(alt);
@@ -125,6 +133,7 @@ export async function sicherungPruefen(datei) {
     erstellt: daten.erstellt,
     plaetze: vergleich(daten.plaetze, plaetze),
     maengel: vergleich(daten.maengel, maengel),
+    offerten: vergleich(daten.offerten, offerten),
     fotos: (daten.fotos || []).length,
   };
 }
@@ -138,7 +147,9 @@ export async function sicherungEinlesen(daten, fortschritt = () => {}) {
     fotos.push({ ...f, daten: await ausBase64(f.daten, f.typ || 'image/jpeg') });
     fortschritt(i + 1, liste.length);
   }
-  await db.importieren({ plaetze: daten.plaetze, maengel: daten.maengel, fotos });
+  await db.importieren({
+    plaetze: daten.plaetze, maengel: daten.maengel, offerten: daten.offerten || [], positionen: daten.positionen || [], fotos,
+  });
 }
 
 export async function speicherInfo() {

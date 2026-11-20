@@ -1,9 +1,10 @@
 // Datenhaltung in IndexedDB. Alle Daten bleiben auf dem Gerät.
 // Stores: plaetze, maengel (Index platzId), fotos (Bilddaten getrennt, damit Listen schnell bleiben),
-// vorschauen (kleine Bilder für Listen, gleiche id wie das Foto; ab Version 2).
+// vorschauen (kleine Bilder für Listen, gleiche id wie das Foto; ab Version 2),
+// offerten und positionen (Index offerteId) für die Offerte-Aufnahme (ab Version 3).
 
 const DB_NAME = 'maengelapp';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbPromise = null;
 
@@ -26,6 +27,13 @@ function oeffnen() {
         }
         if (!db.objectStoreNames.contains('vorschauen')) {
           db.createObjectStore('vorschauen', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('offerten')) {
+          db.createObjectStore('offerten', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('positionen')) {
+          const s = db.createObjectStore('positionen', { keyPath: 'id' });
+          s.createIndex('offerteId', 'offerteId', { unique: false });
         }
       };
       anfrage.onsuccess = () => {
@@ -192,38 +200,112 @@ export function schluessel(store) {
 }
 
 // Übernimmt Daten aus einer Sicherung. Bestehendes bleibt; bei gleicher id gewinnt der neuere Stand.
-// Danach werden Fotos gelöscht, die zu keinem Mangel mehr gehören.
-export function importieren({ plaetze, maengel, fotos }) {
-  return transaktion(['plaetze', 'maengel', 'fotos', 'vorschauen'], 'readwrite', (tx) => {
-    const ps = tx.objectStore('plaetze');
-    const ms = tx.objectStore('maengel');
+// Danach werden Fotos gelöscht, die zu keinem Mangel und keiner Position mehr gehören.
+export function importieren({ plaetze = [], maengel = [], fotos = [], offerten = [], positionen = [] }) {
+  const stores = ['plaetze', 'maengel', 'fotos', 'vorschauen', 'offerten', 'positionen'];
+  return transaktion(stores, 'readwrite', (tx) => {
     const fs = tx.objectStore('fotos');
     const vs = tx.objectStore('vorschauen');
     const neuer = (alt, neu) => !alt || String(neu.geaendert || '') > String(alt.geaendert || '');
-    for (const p of plaetze) {
-      ps.get(p.id).onsuccess = (ev) => { if (neuer(ev.target.result, p)) ps.put(p); };
-    }
     for (const f of fotos) {
       fs.getKey(f.id).onsuccess = (ev) => { if (ev.target.result === undefined) fs.put(f); };
     }
-    let offen = maengel.length;
+    const listen = [['plaetze', plaetze], ['maengel', maengel], ['offerten', offerten], ['positionen', positionen]];
+    let offen = listen.reduce((summe, [, liste]) => summe + liste.length, 0);
     const aufraeumen = () => {
-      // Alle Mängel lesen und nicht mehr benutzte Fotos entfernen
-      ms.getAll().onsuccess = (ev) => {
-        const benutzt = new Set();
+      // Benutzte Fotos sammeln, alle anderen entfernen
+      const benutzt = new Set();
+      tx.objectStore('maengel').getAll().onsuccess = (ev) => {
         for (const m of ev.target.result) for (const feld of FOTO_FELDER) if (m[feld]) benutzt.add(m[feld]);
-        fs.getAllKeys().onsuccess = (ev2) => {
-          for (const id of ev2.target.result) if (!benutzt.has(id)) { fs.delete(id); vs.delete(id); }
+        tx.objectStore('positionen').getAll().onsuccess = (ev2) => {
+          for (const p of ev2.target.result) for (const id of p.fotoIds || []) benutzt.add(id);
+          fs.getAllKeys().onsuccess = (ev3) => {
+            for (const id of ev3.target.result) if (!benutzt.has(id)) { fs.delete(id); vs.delete(id); }
+          };
         };
       };
     };
     if (offen === 0) aufraeumen();
-    for (const m of maengel) {
-      ms.get(m.id).onsuccess = (ev) => {
-        if (neuer(ev.target.result, m)) ms.put(m);
-        offen -= 1;
-        if (offen === 0) aufraeumen();
-      };
+    for (const [store, liste] of listen) {
+      const st = tx.objectStore(store);
+      for (const x of liste) {
+        st.get(x.id).onsuccess = (ev) => {
+          if (neuer(ev.target.result, x)) st.put(x);
+          offen -= 1;
+          if (offen === 0) aufraeumen();
+        };
+      }
     }
+  }).then(aenderungMerken);
+}
+
+// ---------- Offerten ----------
+
+export function positionenVonOfferte(offerteId) {
+  return transaktion(['positionen'], 'readonly', (tx, e) => {
+    tx.objectStore('positionen').index('offerteId').getAll(offerteId).onsuccess = (ev) => {
+      // Reihenfolge = Erfassung
+      e.wert = ev.target.result.sort((a, b) => String(a.erstellt).localeCompare(String(b.erstellt)));
+    };
+  });
+}
+
+export function offerteSpeichern(offerte) {
+  const jetzt = new Date().toISOString();
+  const o = { ...offerte, geaendert: jetzt };
+  if (!o.id) { o.id = neueId(); o.erstellt = jetzt; }
+  return transaktion(['offerten'], 'readwrite', (tx) => {
+    tx.objectStore('offerten').put(o);
+  }).then(() => { aenderungMerken(); return o; });
+}
+
+// Löscht die Offerte mit allen Positionen und Fotos
+export function offerteLoeschen(offerteId) {
+  return transaktion(['offerten', 'positionen', 'fotos', 'vorschauen'], 'readwrite', (tx) => {
+    const pos = tx.objectStore('positionen');
+    pos.index('offerteId').getAll(offerteId).onsuccess = (ev) => {
+      for (const p of ev.target.result) {
+        for (const id of p.fotoIds || []) { tx.objectStore('fotos').delete(id); tx.objectStore('vorschauen').delete(id); }
+        pos.delete(p.id);
+      }
+    };
+    tx.objectStore('offerten').delete(offerteId);
+  }).then(aenderungMerken);
+}
+
+// Speichert eine Position. fotos = { neu: [fotoObjekt], entfernen: [fotoId] }
+export function positionSpeichern(position, fotos = {}) {
+  const jetzt = new Date().toISOString();
+  const p = { ...position, geaendert: jetzt, fotoIds: [...(position.fotoIds || [])] };
+  if (!p.id) { p.id = neueId(); p.erstellt = jetzt; }
+  return transaktion(['positionen', 'fotos', 'vorschauen', 'offerten'], 'readwrite', (tx) => {
+    const fotoStore = tx.objectStore('fotos');
+    const vorschauStore = tx.objectStore('vorschauen');
+    for (const id of fotos.entfernen || []) {
+      fotoStore.delete(id);
+      vorschauStore.delete(id);
+      p.fotoIds = p.fotoIds.filter((x) => x !== id);
+    }
+    for (const neu of fotos.neu || []) {
+      const { vorschau, ...foto } = neu;
+      const id = neueId();
+      fotoStore.put({ id, ...foto, erstellt: jetzt });
+      if (vorschau) vorschauStore.put({ id, ...vorschau });
+      p.fotoIds.push(id);
+    }
+    tx.objectStore('positionen').put(p);
+    // Offerte als geändert markieren (für die Sortierung der Liste)
+    const offerten = tx.objectStore('offerten');
+    offerten.get(p.offerteId).onsuccess = (ev) => {
+      const o = ev.target.result;
+      if (o) offerten.put({ ...o, geaendert: jetzt });
+    };
+  }).then(() => { aenderungMerken(); return p; });
+}
+
+export function positionLoeschen(position) {
+  return transaktion(['positionen', 'fotos', 'vorschauen'], 'readwrite', (tx) => {
+    for (const id of position.fotoIds || []) { tx.objectStore('fotos').delete(id); tx.objectStore('vorschauen').delete(id); }
+    tx.objectStore('positionen').delete(position.id);
   }).then(aenderungMerken);
 }

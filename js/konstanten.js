@@ -25,3 +25,11 @@ export function maengelSortieren(liste) {
     || (istErledigt(a) ? 0 : dringlichkeit(a).rang - dringlichkeit(b).rang)
     || String(b.erledigtAm || b.erstellt).localeCompare(String(a.erledigtAm || a.erstellt)));
 }
+
+// Arten von Positionen bei der Offerte-Aufnahme
+export const POSITIONSARTEN = [
+  'Kunstrasen', 'Naturrasen', 'Linierung', 'Tore / Netze', 'Zaun / Ballfang',
+  'Entwässerung', 'Beleuchtung', 'Belag', 'Ausstattung', 'Sonstiges',
+];
+
+export const MAX_FOTOS_POSITION = 5;

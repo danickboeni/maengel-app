@@ -8,12 +8,16 @@ import {
 } from './karte.js';
 import {
   KATEGORIEN, DRINGLICHKEIT, ERLEDIGT_FARBE, istErledigt, dringlichkeit, maengelSortieren,
+  POSITIONSARTEN, MAX_FOTOS_POSITION,
 } from './konstanten.js';
 import {
   sicherungErstellen, sicherungWeitergeben, sicherungPruefen, sicherungEinlesen, sicherungFaellig,
   letzteSicherung, speicherInfo, groesseText, dateiWeitergeben, ERINNERUNG_TAGE,
 } from './sicherung.js';
-import { berichtErstellen } from './bericht.js';
+import { berichtErstellen, offerteBerichtErstellen } from './bericht.js';
+import {
+  Messwerkzeug, formZeichnen, messMenge, messText, zahlText, EINHEITEN, MESS_EINHEIT, MESS_NAME, FORM_FARBE,
+} from './messen.js';
 
 
 const ansicht = document.getElementById('ansicht');
@@ -134,7 +138,15 @@ function schutz(fn) { aktuelleAnsicht.schutz = fn; }
 function nochAktuell(token) { return token === aktuelleAnsicht; }
 
 const routen = [
-  [/^#\/?$/, () => plaetzeListe()],
+  [/^#\/?$/, () => startAnsicht()],
+  [/^#\/plaetze$/, () => plaetzeListe()],
+  [/^#\/offerten$/, () => offertenListe()],
+  [/^#\/offerte\/neu$/, () => offerteFormular(null)],
+  [/^#\/offerte\/([\w-]+)\/bearbeiten$/, (m) => offerteFormular(m[1])],
+  [/^#\/offerte\/([\w-]+)\/position\/neu$/, (m) => positionFormular({ offerteId: m[1] })],
+  [/^#\/offerte\/([\w-]+)\/pdf$/, (m) => offerteBerichtAnsicht(m[1])],
+  [/^#\/offerte\/([\w-]+)$/, (m) => offerteAnsicht(m[1])],
+  [/^#\/position\/([\w-]+)$/, (m) => positionFormular({ positionId: m[1] })],
   [/^#\/maengel(?:\?(.*))?$/, (m) => maengelListe(m[1])],
   [/^#\/sicherung$/, () => sicherungAnsicht()],
   [/^#\/platz\/([\w-]+)\/bericht$/, (m) => berichtAnsicht(m[1])],
@@ -204,9 +216,8 @@ function reiterHtml(aktiv, knopf = '') {
   return `<div class="aktionen spalte">
     ${knopf}
     <nav class="reiter" aria-label="Bereiche">
-      <a href="#/" data-reiter class="${aktiv === 'plaetze' ? 'aktiv' : ''}" ${aktiv === 'plaetze' ? 'aria-current="page"' : ''}>Plätze</a>
+      <a href="#/plaetze" data-reiter class="${aktiv === 'plaetze' ? 'aktiv' : ''}" ${aktiv === 'plaetze' ? 'aria-current="page"' : ''}>Plätze</a>
       <a href="#/maengel" data-reiter class="${aktiv === 'maengel' ? 'aktiv' : ''}" ${aktiv === 'maengel' ? 'aria-current="page"' : ''}>Mängel</a>
-      <a href="#/sicherung" data-reiter class="${aktiv === 'sicherung' ? 'aktiv' : ''}${sicherungFaellig() ? ' faellig' : ''}" ${aktiv === 'sicherung' ? 'aria-current="page"' : ''}>Sicherung</a>
     </nav>
   </div>`;
 }
@@ -275,7 +286,7 @@ function fotoFeldAktivieren(el, bestehend, { beiAenderung, knopf }) {
 
 async function plaetzeListe() {
   const token = aktuelleAnsicht;
-  kopf('Plätze', null, null);
+  kopf('Plätze', '#/', null);
   const [plaetze, maengel] = await Promise.all([db.alle('plaetze'), db.alle('maengel')]);
   if (!nochAktuell(token)) return;
   plaetze.sort((a, b) => a.name.localeCompare(b.name, 'de-CH'));
@@ -287,20 +298,7 @@ async function plaetzeListe() {
     if (m.dringlichkeit === 'hoch') z.hoch += 1;
   }
 
-  // Daten aus früheren Versionen haben noch keine Änderungszeit: jetzt setzen, damit die Erinnerung greift
-  if ((plaetze.length || maengel.length) && einstellungLesen('letzte-aenderung-gesetzt', null) === null) {
-    try { if (!localStorage.getItem('letzte-aenderung')) db.aenderungMerken(); } catch (_) { /* egal */ }
-    einstellungSchreiben('letzte-aenderung-gesetzt', true);
-  }
-  const letzte = letzteSicherung();
-  const erinnerung = sicherungFaellig() && (plaetze.length || maengel.length)
-    ? `<a class="erinnerung" href="#/sicherung" data-reiter>
-        <strong>Sicherung fällig</strong>
-        <span>${letzte ? `Letzte Sicherung am ${kurzdatum(letzte)}.` : 'Du hast noch nie gesichert.'} Tippe hier, um deine Daten zu sichern.</span>
-      </a>`
-    : '';
   ansicht.innerHTML = `
-    ${erinnerung}
     ${plaetze.length === 0 ? `
       <div class="leer">
         <p><strong>Noch keine Plätze.</strong></p>
@@ -340,7 +338,7 @@ async function maengelListe(abfrage) {
   if (vonPlatz) filter.platz = vonPlatz;
   if (filter.platz && !platzName[filter.platz]) filter.platz = '';
 
-  kopf('Mängel', vonPlatz ? `#/platz/${vonPlatz}` : null, null);
+  kopf('Mängel', vonPlatz ? `#/platz/${vonPlatz}` : '#/', null);
   ansicht.innerHTML = `
     <div class="filter">
       <div class="segmente klein" id="f-status" role="group" aria-label="Status">
@@ -456,7 +454,7 @@ async function platzFormular(platzId) {
     if (!platz) throw new Error('Platz nicht gefunden.');
   }
   if (!nochAktuell(token)) return;
-  const zurueck = platz ? `#/platz/${platz.id}` : '#/';
+  const zurueck = platz ? `#/platz/${platz.id}` : '#/plaetze';
   kopf(platz ? 'Platz bearbeiten' : 'Neuer Platz', zurueck, null);
 
   ansicht.innerHTML = `
@@ -548,7 +546,7 @@ async function platzFormular(platzId) {
       if (!confirm(frage)) return;
       await db.platzLoeschen(platz.id);
       meldung('Platz gelöscht');
-      zurueckZu('#/');
+      zurueckZu('#/plaetze');
     };
   }
 }
@@ -561,7 +559,7 @@ async function platzAnsicht(platzId) {
   if (!platz) throw new Error('Platz nicht gefunden.');
   const maengel = await db.maengelVonPlatz(platzId);
   if (!nochAktuell(token)) return;
-  kopf(platz.name, '#/', { text: 'Bearbeiten', klick: () => gehe(`#/platz/${platz.id}/bearbeiten`) });
+  kopf(platz.name, '#/plaetze', { text: 'Bearbeiten', klick: () => gehe(`#/platz/${platz.id}/bearbeiten`) });
 
   const offen = maengel.filter((m) => !istErledigt(m));
   const erledigtAnzahl = maengel.length - offen.length;
@@ -963,11 +961,11 @@ async function mangelAnsicht(mangelId) {
 
 async function sicherungAnsicht() {
   const token = aktuelleAnsicht;
-  const [plaetze, maengel, fotoIds, speicher, kacheln] = await Promise.all([
-    db.alle('plaetze'), db.alle('maengel'), db.schluessel('fotos'), speicherInfo(), kachelAnzahl().catch(() => 0),
+  const [plaetze, maengel, offerten, fotoIds, speicher, kacheln] = await Promise.all([
+    db.alle('plaetze'), db.alle('maengel'), db.alle('offerten'), db.schluessel('fotos'), speicherInfo(), kachelAnzahl().catch(() => 0),
   ]);
   if (!nochAktuell(token)) return;
-  kopf('Sicherung', null, null);
+  kopf('Sicherung', '#/', null);
   const letzte = letzteSicherung();
   const faellig = sicherungFaellig();
 
@@ -976,7 +974,7 @@ async function sicherungAnsicht() {
       <section class="karte-block${faellig ? ' warnung' : ''}">
         <h2>Daten sichern</h2>
         <p class="status-zeile">${letzte ? `Letzte Sicherung: <strong>${datum(letzte)}</strong>` : '<strong>Noch keine Sicherung erstellt.</strong>'}</p>
-        <p class="hinweis">Auf diesem Gerät: ${plaetze.length} Plätze, ${anzahlText(maengel.length)}, ${fotoIds.length} Fotos.
+        <p class="hinweis">Auf diesem Gerät: ${plaetze.length} Plätze, ${anzahlText(maengel.length)}, ${offerten.length === 1 ? "1 Offerte" : `${offerten.length} Offerten`}, ${fotoIds.length} Fotos.
           Die Daten liegen nur auf diesem Handy. Sichere sie regelmässig und speichere die Datei an einem sicheren Ort
           (z. B. «In Dateien sichern» → iCloud Drive oder OneDrive, oder per Mail an dich).</p>
         <button type="button" class="knopf haupt" id="sichern">Sicherung erstellen</button>
@@ -1002,7 +1000,7 @@ async function sicherungAnsicht() {
         ${kacheln ? '<button type="button" class="knopf" id="kacheln-loeschen">Offline-Karten löschen</button>' : ''}
       </section>
     </div>
-    ${reiterHtml('sicherung')}`;
+`;
 
   const status = document.getElementById('sichern-status');
   async function sichern(herunterladen) {
@@ -1041,6 +1039,7 @@ async function sicherungAnsicht() {
       const frage = `Sicherung vom ${datum(p.erstellt)} einlesen?\n\n`
         + `Plätze: ${p.plaetze.total} (neu ${p.plaetze.neu}, aktueller ${p.plaetze.aktueller})\n`
         + `Mängel: ${p.maengel.total} (neu ${p.maengel.neu}, aktueller ${p.maengel.aktueller})\n`
+        + `Offerten: ${p.offerten.total} (neu ${p.offerten.neu}, aktueller ${p.offerten.aktueller})\n`
         + `Fotos: ${p.fotos}\n\n`
         + 'Daten auf diesem Gerät bleiben erhalten.';
       if (!confirm(frage)) { einlesenStatus.textContent = ''; return; }
@@ -1159,6 +1158,728 @@ async function berichtAnsicht(platzId) {
     }
   };
   document.getElementById('b-teilen').onclick = () => { if (datei) dateiWeitergeben(datei, { titel: `Mängelbericht ${platz.name}` }); };
+  document.getElementById('b-laden').onclick = () => { if (datei) dateiWeitergeben(datei, { herunterladen: true }); };
+}
+
+// ---------- Ansicht: Startbildschirm ----------
+
+async function startAnsicht() {
+  const token = aktuelleAnsicht;
+  kopf('Sportplatz', null, null);
+  const [plaetze, maengel, offerten] = await Promise.all([db.alle('plaetze'), db.alle('maengel'), db.alle('offerten')]);
+  if (!nochAktuell(token)) return;
+
+  // Daten aus früheren Versionen haben noch keine Änderungszeit: jetzt setzen, damit die Erinnerung greift
+  const hatDaten = plaetze.length || maengel.length || offerten.length;
+  if (hatDaten && einstellungLesen('letzte-aenderung-gesetzt', null) === null) {
+    try { if (!localStorage.getItem('letzte-aenderung')) db.aenderungMerken(); } catch (_) { /* egal */ }
+    einstellungSchreiben('letzte-aenderung-gesetzt', true);
+  }
+  const faellig = hatDaten && sicherungFaellig();
+  const letzte = letzteSicherung();
+  const offeneMaengel = maengel.filter((m) => !istErledigt(m));
+  const dringend = offeneMaengel.filter((m) => m.dringlichkeit === 'hoch').length;
+  const offeneOfferten = offerten.filter((o) => o.status !== 'abgeschlossen').length;
+
+  ansicht.innerHTML = `
+    ${faellig ? `<a class="erinnerung" href="#/sicherung">
+        <strong>Sicherung fällig</strong>
+        <span>${letzte ? `Letzte Sicherung am ${kurzdatum(letzte)}.` : 'Du hast noch nie gesichert.'} Tippe hier, um deine Daten zu sichern.</span>
+      </a>` : ''}
+    <div class="start">
+      <a class="start-knopf start-maengel" href="#/plaetze">
+        <svg viewBox="0 0 24 24" width="44" height="44" aria-hidden="true"><path d="M12 3 2 20h20L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v5M12 17.5v.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        <span class="start-titel">Mängel erfassen</span>
+        <span class="start-unter">${offeneMaengel.length} offen${dringend ? ` · ${dringend} dringend` : ''} · ${plaetze.length} ${plaetze.length === 1 ? 'Platz' : 'Plätze'}</span>
+      </a>
+      <a class="start-knopf start-offerte" href="#/offerten">
+        <svg viewBox="0 0 24 24" width="44" height="44" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 3h6v3H9zM8.5 11h7M8.5 15h7M8.5 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+        <span class="start-titel">Offerte aufnehmen</span>
+        <span class="start-unter">${offeneOfferten} ${offeneOfferten === 1 ? 'offene Offerte' : 'offene Offerten'}</span>
+      </a>
+      <a class="knopf start-sicherung${faellig ? ' faellig' : ''}" href="#/sicherung">Sicherung</a>
+    </div>`;
+}
+
+// ---------- Ansicht: Offerten ----------
+
+function offerteUntertitel(o) {
+  return [o.kunde?.firma, o.ort].filter(Boolean).map(esc).join(' · ');
+}
+
+async function offertenListe() {
+  const token = aktuelleAnsicht;
+  kopf('Offerten', '#/', null);
+  const [offerten, positionen] = await Promise.all([db.alle('offerten'), db.alle('positionen')]);
+  if (!nochAktuell(token)) return;
+  const anzahl = {};
+  for (const p of positionen) anzahl[p.offerteId] = (anzahl[p.offerteId] || 0) + 1;
+  let status = einstellungLesen('offerten-filter', 'offen');
+
+  ansicht.innerHTML = `
+    <div class="filter">
+      <div class="segmente klein" id="o-status" role="group" aria-label="Status">
+        <button type="button" class="segment" data-wert="offen">Offen</button>
+        <button type="button" class="segment" data-wert="abgeschlossen">Abgeschlossen</button>
+        <button type="button" class="segment" data-wert="alle">Alle</button>
+      </div>
+    </div>
+    <ul class="liste" id="o-liste"></ul>
+    <div class="aktionen"><a class="knopf haupt" href="#/offerte/neu">+ Offerte</a></div>`;
+
+  function zeichnen() {
+    for (const b of document.querySelectorAll('#o-status button')) {
+      const an = b.dataset.wert === status;
+      b.classList.toggle('aktiv', an);
+      b.setAttribute('aria-pressed', an);
+    }
+    const liste = offerten
+      .filter((o) => status === 'alle' || (status === 'abgeschlossen' ? o.status === 'abgeschlossen' : o.status !== 'abgeschlossen'))
+      .sort((a, b) => String(b.geaendert).localeCompare(String(a.geaendert)));
+    document.getElementById('o-liste').innerHTML = liste.length === 0
+      ? `<li class="leer">${offerten.length ? 'Keine Offerten für diesen Filter.' : '<strong>Noch keine Offerten.</strong><br>Tippe unten auf «+ Offerte».'}</li>`
+      : liste.map((o) => `<li><a class="eintrag" href="#/offerte/${o.id}">
+          <span class="eintrag-text">
+            <span class="eintrag-titel">${esc(o.titel)}</span>
+            <span class="eintrag-unter">${offerteUntertitel(o) || '–'}</span>
+            <span class="eintrag-unter">${o.datum ? `Begehung ${kurzdatum(o.datum)}` : ''}</span>
+          </span>
+          <span class="eintrag-zahlen">
+            <span>${anzahl[o.id] || 0} Pos.</span>
+            ${o.status === 'abgeschlossen' ? `<span class="marke" style="background:${ERLEDIGT_FARBE}">abgeschlossen</span>` : ''}
+          </span>
+        </a></li>`).join('');
+  }
+  document.getElementById('o-status').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-wert]');
+    if (!b) return;
+    status = b.dataset.wert;
+    einstellungSchreiben('offerten-filter', status);
+    zeichnen();
+  });
+  zeichnen();
+}
+
+function heute() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+async function offerteFormular(offerteId) {
+  const token = aktuelleAnsicht;
+  let offerte = null;
+  if (offerteId) {
+    offerte = await db.holen('offerten', offerteId);
+    if (!offerte) throw new Error('Offerte nicht gefunden.');
+  }
+  const plaetze = (await db.alle('plaetze')).sort((a, b) => a.name.localeCompare(b.name, 'de-CH'));
+  if (!nochAktuell(token)) return;
+  const zurueck = offerte ? `#/offerte/${offerte.id}` : '#/offerten';
+  kopf(offerte ? 'Offerte bearbeiten' : 'Neue Offerte', zurueck, null);
+  const k = offerte?.kunde || {};
+
+  ansicht.innerHTML = `
+    <form id="offerte-form" class="formular" novalidate>
+      <label class="feld">Titel der Offerte
+        <input name="titel" required maxlength="100" autocomplete="off" placeholder="z. B. Sanierung Kunstrasen" value="${esc(offerte?.titel)}">
+      </label>
+      <fieldset class="feld gruppe">
+        <legend>Kunde</legend>
+        <label class="feld">Auftraggeber
+          <input name="firma" maxlength="100" autocomplete="organization" placeholder="z. B. Gemeinde, Verein" value="${esc(k.firma)}">
+        </label>
+        <label class="feld">Ansprechperson
+          <input name="person" maxlength="100" autocomplete="name" value="${esc(k.person)}">
+        </label>
+        <label class="feld">Telefon
+          <input name="telefon" type="tel" maxlength="40" autocomplete="tel" value="${esc(k.telefon)}">
+        </label>
+        <label class="feld">E-Mail
+          <input name="email" type="email" maxlength="100" autocomplete="email" value="${esc(k.email)}">
+        </label>
+      </fieldset>
+      ${plaetze.length ? `<label class="feld">Ort von einem Platz übernehmen (freiwillig)
+        <select name="platzId" class="auswahl">
+          <option value="">– kein Platz –</option>
+          ${plaetze.map((p) => `<option value="${p.id}" ${offerte?.platzId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+        </select>
+      </label>` : ''}
+      <label class="feld">Ort / Adresse
+        <input name="ort" maxlength="120" autocomplete="off" placeholder="z. B. Sportanlage Allmend, Bern" value="${esc(offerte?.ort)}">
+      </label>
+      <div class="feld">
+        <span>Lage auf der Karte</span>
+        <span class="hinweis">Schiebe die Karte, bis die Anlage unter dem Pin liegt.</span>
+        <div class="karte-rahmen">
+          <div id="karte" class="karte"></div>
+          ${pinHtml('pin-platz')}
+          <button type="button" id="gps-knopf" class="karte-knopf">Meine Position</button>
+        </div>
+        <span id="gps-status" class="hinweis"></span>
+      </div>
+      <label class="feld">Datum der Begehung
+        <input name="datum" type="date" value="${esc(offerte?.datum || heute())}">
+      </label>
+      <label class="feld">Notiz (freiwillig)
+        <textarea name="notiz" rows="3" maxlength="2000" placeholder="Wünsche des Kunden, Zufahrt, Termine …">${esc(offerte?.notiz)}</textarea>
+      </label>
+      ${offerte ? '<button type="button" id="loeschen" class="knopf gefahr">Offerte löschen</button>' : ''}
+    </form>
+    <div class="aktionen"><button type="submit" form="offerte-form" class="knopf haupt">Speichern</button></div>`;
+
+  const form = document.getElementById('offerte-form');
+  const start = offerte?.lat ? { lat: offerte.lat, lng: offerte.lng, zoom: offerte.zoom || 18 } : SCHWEIZ;
+  const karte = karteErstellen(document.getElementById('karte'), start);
+  beimVerlassen(() => karteEntfernen(karte));
+  let geaendert = false;
+  form.addEventListener('input', () => { geaendert = true; });
+  karte.on('dragstart zoomstart', () => { geaendert = true; });
+  schutz(() => !geaendert || confirm('Änderungen verwerfen?'));
+
+  // Platz übernehmen: Ort und Lage setzen
+  if (form.platzId) {
+    form.platzId.addEventListener('change', () => {
+      const p = plaetze.find((x) => x.id === form.platzId.value);
+      if (!p) return;
+      if (!form.ort.value.trim()) form.ort.value = [p.name, p.ort].filter(Boolean).join(', ');
+      karte.setView([p.lat, p.lng], p.zoom || 18);
+      vonHandVerschoben = true;
+    });
+  }
+
+  const status = document.getElementById('gps-status');
+  let vonHandVerschoben = !!offerte?.lat;
+  karte.on('dragstart', () => { vonHandVerschoben = true; });
+  let stopp = null;
+  function gpsStarten() {
+    if (stopp) stopp();
+    status.textContent = 'Suche GPS …';
+    let erstes = true;
+    stopp = gpsBeobachten((pos) => {
+      status.textContent = `GPS gefunden (± ${pos.genauigkeit} m)`;
+      if (erstes || !vonHandVerschoben) {
+        karte.setView([pos.lat, pos.lng], Math.max(karte.getZoom(), 18));
+        erstes = false;
+      }
+    }, (fehler) => { status.textContent = fehler; });
+  }
+  beimVerlassen(() => { if (stopp) stopp(); });
+  document.getElementById('gps-knopf').onclick = () => { vonHandVerschoben = false; gpsStarten(); };
+  if (!offerte) gpsStarten();
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const titel = form.titel.value.trim();
+    if (!titel) { meldung('Bitte einen Titel eingeben.', true); form.titel.focus(); return; }
+    if (karte.getZoom() < 15) { meldung('Zoome näher an die Anlage heran, damit die Lage stimmt.', true); return; }
+    const mitte = karte.getCenter();
+    try {
+      const gespeichert = await db.offerteSpeichern({
+        status: 'offen',
+        ...(offerte || {}),
+        titel,
+        kunde: {
+          firma: form.firma.value.trim(),
+          person: form.person.value.trim(),
+          telefon: form.telefon.value.trim(),
+          email: form.email.value.trim(),
+        },
+        platzId: form.platzId ? (form.platzId.value || null) : (offerte?.platzId || null),
+        ort: form.ort.value.trim(),
+        lat: mitte.lat,
+        lng: mitte.lng,
+        zoom: karte.getZoom(),
+        datum: form.datum.value || null,
+        notiz: form.notiz.value.trim(),
+      });
+      db.dauerhaftAnfragen();
+      meldung('Offerte gespeichert');
+      if (offerte) zurueckZu(`#/offerte/${gespeichert.id}`);
+      else ersetze(`#/offerte/${gespeichert.id}`);
+    } catch (e) {
+      meldung(`Speichern fehlgeschlagen: ${e.message}`, true);
+    }
+  });
+
+  if (offerte) {
+    document.getElementById('loeschen').onclick = async () => {
+      const anzahl = (await db.positionenVonOfferte(offerte.id)).length;
+      if (!confirm(`Offerte «${offerte.titel}»${anzahl ? ` mit ${anzahl} Positionen und allen Fotos` : ''} endgültig löschen?`)) return;
+      await db.offerteLoeschen(offerte.id);
+      meldung('Offerte gelöscht');
+      zurueckZu('#/offerten');
+    };
+  }
+}
+
+function mengeText(p) {
+  if (p.einheit === 'pauschal') return 'pauschal';
+  if (p.menge == null || p.menge === '') return '–';
+  return `${zahlText(p.menge)} ${p.einheit || ''}`.trim();
+}
+
+async function offerteAnsicht(offerteId) {
+  const token = aktuelleAnsicht;
+  const offerte = await db.holen('offerten', offerteId);
+  if (!offerte) throw new Error('Offerte nicht gefunden.');
+  const positionen = await db.positionenVonOfferte(offerteId);
+  if (!nochAktuell(token)) return;
+  kopf(offerte.titel, '#/offerten', { text: 'Bearbeiten', klick: () => gehe(`#/offerte/${offerte.id}/bearbeiten`) });
+  const k = offerte.kunde || {};
+  const abgeschlossen = offerte.status === 'abgeschlossen';
+
+  ansicht.innerHTML = `
+    <div class="karte-rahmen offerte-karte"><div id="karte" class="karte"></div></div>
+    <div class="detail">
+      <div class="karte-block">
+        <div class="kunde">
+          <strong>${esc(k.firma || 'Kein Auftraggeber erfasst')}</strong>
+          ${k.person ? `<span>${esc(k.person)}</span>` : ''}
+          ${k.telefon ? `<a href="tel:${esc(k.telefon.replace(/[^\d+]/g, ''))}">${esc(k.telefon)}</a>` : ''}
+          ${k.email ? `<a href="mailto:${esc(k.email)}">${esc(k.email)}</a>` : ''}
+        </div>
+        <span class="hinweis">${[offerte.ort, offerte.datum ? `Begehung ${kurzdatum(offerte.datum)}` : ''].filter(Boolean).map(esc).join(' · ')}</span>
+        ${offerte.notiz ? `<p class="notiz">${esc(offerte.notiz)}</p>` : ''}
+        ${abgeschlossen ? `<span class="marke" style="background:${ERLEDIGT_FARBE};justify-self:start">abgeschlossen</span>` : ''}
+      </div>
+      <h2 class="abschnitt">Positionen (${positionen.length})</h2>
+      ${positionen.length === 0 ? '<p class="leer">Noch keine Positionen. Tippe unten auf «+ Position».</p>' : `
+      <ul class="liste ohne-rand">
+        ${positionen.map((p, i) => `<li><a class="eintrag position-eintrag" href="#/position/${p.id}">
+          <span class="pos-nr" style="background:${p.messung ? FORM_FARBE[p.messung.typ] : '#78909c'}">${i + 1}</span>
+          <span class="eintrag-text">
+            <span class="eintrag-titel">${esc(p.art)}</span>
+            ${p.beschreibung ? `<span class="eintrag-notiz">${esc(p.beschreibung)}</span>` : ''}
+            <span class="eintrag-unter">${(p.fotoIds || []).length ? `${p.fotoIds.length} Foto${p.fotoIds.length > 1 ? 's' : ''}` : 'ohne Foto'}${p.messung ? ` · ${MESS_NAME[p.messung.typ]} gemessen` : ''}</span>
+          </span>
+          <span class="menge">${mengeText(p)}</span>
+        </a></li>`).join('')}
+      </ul>`}
+      <button type="button" class="knopf breit" id="status-knopf">${abgeschlossen ? 'Wieder öffnen' : 'Als abgeschlossen markieren'}</button>
+    </div>
+    <div class="aktionen">
+      <a class="knopf" href="#/offerte/${offerte.id}/pdf">PDF</a>
+      <a class="knopf haupt breit" href="#/offerte/${offerte.id}/position/neu">+ Position</a>
+    </div>`;
+
+  const karte = karteErstellen(document.getElementById('karte'), { lat: offerte.lat, lng: offerte.lng, zoom: offerte.zoom || 18 });
+  beimVerlassen(() => karteEntfernen(karte));
+  const grenzen = L.latLngBounds([[offerte.lat, offerte.lng]]);
+  positionen.forEach((p, i) => {
+    const ebene = formZeichnen(p.messung, { nr: i + 1, klick: () => gehe(`#/position/${p.id}`) });
+    if (ebene) {
+      ebene.addTo(karte);
+      for (const x of p.messung.punkte) grenzen.extend(x);
+    }
+  });
+  if (positionen.some((p) => p.messung)) karte.fitBounds(grenzen, { padding: [30, 30], maxZoom: 20 });
+
+  document.getElementById('status-knopf').onclick = async () => {
+    await db.offerteSpeichern({ ...offerte, status: abgeschlossen ? 'offen' : 'abgeschlossen' });
+    meldung(abgeschlossen ? 'Offerte wieder offen' : 'Offerte abgeschlossen');
+    zeigen();
+  };
+}
+
+// ---------- Baustein: mehrere Fotos ----------
+
+function fotosFeldHtml(titel) {
+  return `<div class="feld fotos-feld">
+    <span>${titel}</span>
+    <div class="foto-raster"></div>
+    <div class="knopf-reihe foto-knoepfe">
+      <label class="knopf">Foto aufnehmen<input type="file" accept="image/*" capture="environment" class="foto-kamera" hidden></label>
+      <label class="knopf">Aus Galerie<input type="file" accept="image/*" multiple class="foto-galerie" hidden></label>
+    </div>
+    <span class="hinweis foto-status"></span>
+  </div>`;
+}
+
+// bestehende: Liste von Foto-ids. Liefert { aenderung() } → { neu: [...], entfernen: [...] }
+function fotosFeldAktivieren(el, bestehende, { beiAenderung, knopf, max = MAX_FOTOS_POSITION }) {
+  const eintraege = bestehende.map((id) => ({ id, url: null }));
+  const entfernt = [];
+  const raster = el.querySelector('.foto-raster');
+  const status = el.querySelector('.foto-status');
+  const urls = [];
+  beimVerlassen(() => { for (const u of urls) URL.revokeObjectURL(u); });
+
+  async function zeichnen() {
+    raster.innerHTML = eintraege.map((e, i) => `<div class="foto-kachel">
+      <img alt="Foto ${i + 1}" data-i="${i}">
+      <button type="button" class="foto-x" data-i="${i}" aria-label="Foto ${i + 1} entfernen">×</button>
+    </div>`).join('');
+    el.querySelector('.foto-knoepfe').hidden = eintraege.length >= max;
+    for (const [i, e] of eintraege.entries()) {
+      if (!e.url) {
+        const v = e.neu ? e.neu.vorschau : await db.vorschauHolen(e.id, vorschauAusFoto).catch(() => null);
+        if (v) { e.url = alsUrl(v); urls.push(e.url); }
+      }
+      const img = raster.querySelector(`img[data-i="${i}"]`);
+      if (img && e.url) img.src = e.url;
+    }
+  }
+  raster.addEventListener('click', async (ev) => {
+    const x = ev.target.closest('.foto-x');
+    if (x) {
+      const [e] = eintraege.splice(Number(x.dataset.i), 1);
+      if (e.id) entfernt.push(e.id);
+      beiAenderung();
+      zeichnen();
+      return;
+    }
+    const img = ev.target.closest('img[data-i]');
+    if (!img) return;
+    const e = eintraege[Number(img.dataset.i)];
+    const foto = e.neu || await db.holen('fotos', e.id);
+    if (foto) {
+      const url = alsUrl(foto);
+      urls.push(url);
+      grossAnzeigen(url);
+    }
+  });
+
+  async function gewaehlt(ev) {
+    const dateien = [...(ev.target.files || [])];
+    ev.target.value = '';
+    if (!dateien.length) return;
+    const platz = max - eintraege.length;
+    if (dateien.length > platz) meldung(`Höchstens ${max} Fotos pro Position – ${dateien.length - platz} nicht übernommen.`, true);
+    knopf.disabled = true;
+    try {
+      for (const [i, datei] of dateien.slice(0, platz).entries()) {
+        status.textContent = `Foto ${i + 1} wird verkleinert …`;
+        eintraege.push({ neu: await verkleinern(datei), url: null });
+      }
+      beiAenderung();
+    } catch (e) {
+      meldung(e.message, true);
+    } finally {
+      status.textContent = '';
+      knopf.disabled = false;
+      zeichnen();
+    }
+  }
+  for (const inp of el.querySelectorAll('input[type=file]')) inp.addEventListener('change', gewaehlt);
+  beimVerlassen(() => { for (const el2 of document.querySelectorAll('.foto-voll')) el2.remove(); });
+  zeichnen();
+  return { aenderung: () => ({ neu: eintraege.filter((e) => e.neu).map((e) => e.neu), entfernen: [...entfernt] }) };
+}
+
+// ---------- Ansicht: Position erfassen / bearbeiten ----------
+
+async function positionFormular({ offerteId, positionId }) {
+  const token = aktuelleAnsicht;
+  let position = null;
+  if (positionId) {
+    position = await db.holen('positionen', positionId);
+    if (!position) throw new Error('Position nicht gefunden.');
+    offerteId = position.offerteId;
+  }
+  const offerte = await db.holen('offerten', offerteId);
+  if (!offerte) throw new Error('Offerte nicht gefunden.');
+  const alle = await db.positionenVonOfferte(offerteId);
+  if (!nochAktuell(token)) return;
+  const nr = position ? alle.findIndex((p) => p.id === position.id) + 1 : alle.length + 1;
+  kopf(position ? `Position ${nr}` : 'Neue Position', `#/offerte/${offerte.id}`, null);
+
+  const wahl = { art: position?.art || '', einheit: position?.einheit || 'm²' };
+  const messTyp = position?.messung?.typ || '';
+
+  ansicht.innerHTML = `
+    <form id="position-form" class="formular" novalidate>
+      <fieldset class="feld">
+        <legend>Art der Arbeit</legend>
+        <div class="chips" id="arten">
+          ${POSITIONSARTEN.map((a) => `<button type="button" class="chip${wahl.art === a ? ' aktiv' : ''}" data-wert="${esc(a)}" aria-pressed="${wahl.art === a}">${esc(a)}</button>`).join('')}
+        </div>
+      </fieldset>
+
+      <div class="feld">
+        <span>Messen auf dem Luftbild (freiwillig)</span>
+        <div class="segmente klein vier" id="mess-typ" role="group" aria-label="Messart">
+          <button type="button" class="segment" data-wert="flaeche">Fläche</button>
+          <button type="button" class="segment" data-wert="linie">Länge</button>
+          <button type="button" class="segment" data-wert="punkt">Punkte</button>
+          <button type="button" class="segment" data-wert="">Ohne</button>
+        </div>
+        <div class="karte-rahmen gross">
+          <div id="karte" class="karte"></div>
+          <div class="mess-anzeige" id="mess-anzeige" hidden></div>
+        </div>
+        <div class="knopf-reihe" id="mess-knoepfe">
+          <button type="button" class="knopf klein" id="mess-zurueck">Rückgängig</button>
+          <button type="button" class="knopf klein" id="mess-leeren">Alles löschen</button>
+        </div>
+        <span class="hinweis" id="mess-hinweis"></span>
+      </div>
+
+      <div class="feld">
+        <span>Menge</span>
+        <div class="menge-reihe">
+          <input name="menge" inputmode="decimal" autocomplete="off" placeholder="z. B. 1200" value="${position?.menge != null ? esc(String(position.menge)) : ''}" aria-label="Menge">
+          <div class="segmente klein vier" id="einheit" role="group" aria-label="Einheit">
+            ${EINHEITEN.map((e) => `<button type="button" class="segment" data-wert="${e}">${e}</button>`).join('')}
+          </div>
+        </div>
+        <span class="hinweis" id="menge-hinweis"></span>
+      </div>
+
+      <label class="feld">Beschreibung
+        <textarea name="beschreibung" rows="3" maxlength="2000" placeholder="Was ist zu tun? Material, Zustand, Besonderheiten …">${esc(position?.beschreibung)}</textarea>
+      </label>
+
+      ${fotosFeldHtml(`Fotos (bis ${MAX_FOTOS_POSITION})`)}
+
+      ${position ? '<button type="button" id="loeschen" class="knopf gefahr">Position löschen</button>' : ''}
+    </form>
+    <div class="aktionen"><button type="submit" form="position-form" class="knopf haupt" id="speichern">Speichern</button></div>`;
+
+  const form = document.getElementById('position-form');
+  const speichernKnopf = document.getElementById('speichern');
+  let geaendert = false;
+  const markiere = () => { geaendert = true; };
+  form.addEventListener('input', markiere);
+  schutz(() => !geaendert || confirm(position ? 'Änderungen verwerfen?' : 'Position verwerfen?'));
+
+  // --- Karte mit den anderen Positionen (blass) ---
+  const karte = karteErstellen(document.getElementById('karte'), { lat: offerte.lat, lng: offerte.lng, zoom: Math.max(offerte.zoom || 18, 19) });
+  beimVerlassen(() => karteEntfernen(karte));
+  alle.forEach((p, i) => {
+    if (position && p.id === position.id) return;
+    const ebene = formZeichnen(p.messung, { nr: i + 1, gedimmt: true });
+    if (ebene) ebene.addTo(karte);
+  });
+  if (position?.messung?.punkte?.length) {
+    karte.fitBounds(L.latLngBounds(position.messung.punkte), { padding: [40, 40], maxZoom: 20 });
+  }
+
+  // --- Messen ---
+  const mengeFeld = form.menge;
+  const mengeHinweis = document.getElementById('menge-hinweis');
+  // Menge von Hand gesetzt? Dann nicht mehr automatisch überschreiben
+  let mengeVonHand = !!position && position.menge != null && position.menge !== messMenge(position.messung);
+  const hinweise = {
+    flaeche: 'Tippe die Ecken der Fläche nacheinander an. Punkte kannst du verschieben.',
+    linie: 'Tippe Anfang, Knicke und Ende der Strecke an. Punkte kannst du verschieben.',
+    punkt: 'Tippe jede Stelle einmal an, die Anzahl wird gezählt.',
+    '': 'Ohne Messung: Menge unten von Hand eingeben.',
+  };
+  const werkzeug = new Messwerkzeug(karte, { beiAenderung: messungGeaendert });
+  beimVerlassen(() => werkzeug.entfernen());
+  werkzeug.setzen(position?.messung || null);
+  werkzeug.typSetzen(messTyp || null);
+
+  function messAnzeige() {
+    const typ = werkzeug.typ || '';
+    for (const b of document.querySelectorAll('#mess-typ button')) {
+      const an = b.dataset.wert === typ;
+      b.classList.toggle('aktiv', an);
+      b.setAttribute('aria-pressed', an);
+    }
+    const m = werkzeug.messung();
+    const text = m ? messText(m) : '';
+    const anzeige = document.getElementById('mess-anzeige');
+    anzeige.hidden = !typ;
+    anzeige.textContent = text ? `${MESS_NAME[typ]}: ${text}` : (typ ? `${MESS_NAME[typ]}: Punkte setzen` : '');
+    document.getElementById('mess-knoepfe').hidden = !typ;
+    document.getElementById('mess-zurueck').disabled = !werkzeug.punkte.length;
+    document.getElementById('mess-leeren').disabled = !werkzeug.punkte.length;
+    document.getElementById('mess-hinweis').textContent = hinweise[typ];
+  }
+  function einheitAnzeigen() {
+    for (const b of document.querySelectorAll('#einheit button')) {
+      const an = b.dataset.wert === wahl.einheit;
+      b.classList.toggle('aktiv', an);
+      b.setAttribute('aria-pressed', an);
+    }
+    mengeFeld.disabled = wahl.einheit === 'pauschal';
+    if (wahl.einheit === 'pauschal') mengeFeld.value = '';
+  }
+  function messungGeaendert() {
+    markiere();
+    const m = werkzeug.messung();
+    const menge = messMenge(m);
+    if (!mengeVonHand && m && menge != null) {
+      mengeFeld.value = String(menge);
+      wahl.einheit = MESS_EINHEIT[m.typ];
+      einheitAnzeigen();
+      mengeHinweis.textContent = 'Menge aus der Messung übernommen.';
+    } else if (mengeVonHand && m && menge != null) {
+      mengeHinweis.innerHTML = `Gemessen: ${esc(messText(m))}. <button type="button" class="link" id="mess-uebernehmen">Messwert übernehmen</button>`;
+    }
+    messAnzeige();
+  }
+  mengeHinweis.addEventListener('click', (ev) => {
+    if (!ev.target.closest('#mess-uebernehmen')) return;
+    mengeVonHand = false;
+    messungGeaendert();
+  });
+  mengeFeld.addEventListener('input', () => {
+    mengeVonHand = mengeFeld.value.trim() !== '';
+    mengeHinweis.textContent = '';
+  });
+
+  document.getElementById('mess-typ').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-wert]');
+    if (!b) return;
+    const typ = b.dataset.wert;
+    if (!typ && werkzeug.punkte.length && !confirm('Messung verwerfen?')) return;
+    if (!typ) werkzeug.leeren();
+    werkzeug.typSetzen(typ || null);
+    messungGeaendert();
+  });
+  document.getElementById('mess-zurueck').onclick = () => werkzeug.rueckgaengig();
+  document.getElementById('mess-leeren').onclick = () => { if (confirm('Alle Messpunkte löschen?')) werkzeug.leeren(); };
+  messAnzeige();
+  einheitAnzeigen();
+  geaendert = false; // Aufbau der Messung zählt nicht als Änderung
+
+  document.getElementById('einheit').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-wert]');
+    if (!b) return;
+    wahl.einheit = b.dataset.wert;
+    einheitAnzeigen();
+    markiere();
+  });
+  document.getElementById('arten').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-wert]');
+    if (!b) return;
+    wahl.art = b.dataset.wert;
+    for (const x of document.querySelectorAll('#arten button')) {
+      const an = x === b;
+      x.classList.toggle('aktiv', an);
+      x.setAttribute('aria-pressed', an);
+    }
+    markiere();
+  });
+
+  const fotos = fotosFeldAktivieren(form.querySelector('.fotos-feld'), position?.fotoIds || [], { beiAenderung: markiere, knopf: speichernKnopf });
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (!wahl.art) {
+      meldung('Bitte die Art der Arbeit wählen.', true);
+      document.getElementById('arten').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    const rohMenge = mengeFeld.value.trim().replace(/[’'\s]/g, '').replace(',', '.');
+    const menge = wahl.einheit === 'pauschal' || rohMenge === '' ? null : Number(rohMenge);
+    if (menge != null && (Number.isNaN(menge) || menge < 0)) {
+      meldung('Die Menge ist keine gültige Zahl.', true);
+      mengeFeld.focus();
+      return;
+    }
+    const messung = werkzeug.messung();
+    if (messung && messung.typ === 'flaeche' && messung.punkte.length < 3) {
+      if (!confirm('Für eine Fläche braucht es mindestens 3 Punkte. Ohne Messung speichern?')) return;
+    }
+    speichernKnopf.disabled = true;
+    try {
+      await db.positionSpeichern({
+        ...(position || { offerteId: offerte.id, fotoIds: [] }),
+        art: wahl.art,
+        beschreibung: form.beschreibung.value.trim(),
+        menge,
+        einheit: wahl.einheit,
+        messung: messung && (messung.typ !== 'flaeche' || messung.punkte.length >= 3) && (messung.typ !== 'linie' || messung.punkte.length >= 2) ? messung : null,
+      }, fotos.aenderung());
+      db.dauerhaftAnfragen();
+      meldung('Position gespeichert');
+      zurueckZu(`#/offerte/${offerte.id}`);
+    } catch (e) {
+      speichernKnopf.disabled = false;
+      meldung(`Speichern fehlgeschlagen: ${e.message}`, true);
+    }
+  });
+
+  if (position) {
+    document.getElementById('loeschen').onclick = async () => {
+      if (!confirm(`Position ${nr} «${position.art}»${(position.fotoIds || []).length ? ' mit Fotos' : ''} endgültig löschen?`)) return;
+      await db.positionLoeschen(position);
+      meldung('Position gelöscht');
+      zurueckZu(`#/offerte/${offerte.id}`);
+    };
+  }
+}
+
+// ---------- Ansicht: PDF «Aufnahme für Offerte» ----------
+
+async function offerteBerichtAnsicht(offerteId) {
+  const token = aktuelleAnsicht;
+  const offerte = await db.holen('offerten', offerteId);
+  if (!offerte) throw new Error('Offerte nicht gefunden.');
+  const positionen = await db.positionenVonOfferte(offerteId);
+  if (!nochAktuell(token)) return;
+  kopf('PDF Offerte', `#/offerte/${offerte.id}`, null);
+  let mitFotos = true;
+
+  ansicht.innerHTML = `
+    <div class="formular">
+      <div class="zusammenfassung">
+        <strong>${esc(offerte.titel)}</strong>
+        <span>${offerteUntertitel(offerte) || '–'} · ${positionen.length} Positionen</span>
+      </div>
+      <fieldset class="feld">
+        <legend>Fotos im PDF?</legend>
+        <div class="segmente klein zwei" id="b-fotos">
+          <button type="button" class="segment" data-wert="ja">Mit Fotos</button>
+          <button type="button" class="segment" data-wert="nein">Ohne Fotos</button>
+        </div>
+      </fieldset>
+      <p class="hinweis">Das PDF «Aufnahme für Offerte» enthält Kunde, einen Plan mit den gemessenen Flächen und Linien,
+        die Positionsliste mit Mengen und – falls gewählt – die Fotos. Preise sind keine enthalten.</p>
+      <span class="hinweis" id="b-status" aria-live="polite"></span>
+      <div id="b-fertig" hidden class="karte-block">
+        <strong id="b-fertig-text"></strong>
+        <div class="knopf-reihe">
+          <button type="button" class="knopf" id="b-teilen">Teilen</button>
+          <button type="button" class="knopf" id="b-laden">Herunterladen</button>
+        </div>
+      </div>
+    </div>
+    <div class="aktionen"><button type="button" class="knopf haupt" id="b-erstellen">PDF erstellen</button></div>`;
+
+  function zeichnen() {
+    for (const b of document.querySelectorAll('#b-fotos button')) {
+      const an = (b.dataset.wert === 'ja') === mitFotos;
+      b.classList.toggle('aktiv', an);
+      b.setAttribute('aria-pressed', an);
+    }
+  }
+  document.getElementById('b-fotos').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-wert]');
+    if (b) { mitFotos = b.dataset.wert === 'ja'; zeichnen(); }
+  });
+  zeichnen();
+
+  let datei = null;
+  const status = document.getElementById('b-status');
+  const knopf = document.getElementById('b-erstellen');
+  const titel = `Aufnahme Offerte ${offerte.titel}`;
+  knopf.onclick = async () => {
+    knopf.disabled = true;
+    document.getElementById('b-fertig').hidden = true;
+    try {
+      const ergebnis = await offerteBerichtErstellen(offerte, {
+        mitFotos,
+        meldung: (t) => { if (nochAktuell(token)) status.textContent = t; },
+      });
+      if (!nochAktuell(token)) return;
+      datei = ergebnis.datei;
+      status.textContent = ergebnis.planFehlend ? 'Hinweis: Das Luftbild im Plan ist unvollständig (kein Empfang?).' : '';
+      document.getElementById('b-fertig-text').textContent = `PDF bereit: ${ergebnis.anzahl} Positionen, ${ergebnis.seiten} Seiten, ${groesseText(datei.size)}`;
+      document.getElementById('b-fertig').hidden = false;
+      await dateiWeitergeben(datei, { titel });
+    } catch (e) {
+      console.error(e);
+      status.textContent = '';
+      meldung(`PDF fehlgeschlagen: ${e.message}`, true);
+    } finally {
+      knopf.disabled = false;
+    }
+  };
+  document.getElementById('b-teilen').onclick = () => { if (datei) dateiWeitergeben(datei, { titel }); };
   document.getElementById('b-laden').onclick = () => { if (datei) dateiWeitergeben(datei, { herunterladen: true }); };
 }
 
