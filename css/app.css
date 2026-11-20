@@ -205,7 +205,7 @@ body {
 .segmente { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .segment {
   min-height: 56px;
-  border: 2px solid var(--farbe);
+  border: 2px solid var(--farbe, #b9c3be);
   border-radius: var(--radius);
   background: #fff;
   color: var(--text);
@@ -213,7 +213,13 @@ body {
   font-weight: 600;
   cursor: pointer;
 }
-.segment.aktiv { background: var(--farbe); color: #fff; }
+.segment.aktiv { background: var(--farbe, var(--gruen)); border-color: var(--farbe, var(--gruen)); color: #fff; }
+
+/* kleine Umschalter (Filter, Karte) */
+.segmente.klein { gap: 0; border-radius: var(--radius); overflow: hidden; border: 1px solid #b9c3be; background: #fff; }
+.segmente.klein .segment { min-height: 46px; border: 0; border-radius: 0; font-size: 16px; }
+.segmente.klein .segment + .segment { border-left: 1px solid #d9dfdb; }
+.segmente.klein .segment.aktiv { background: var(--gruen); color: #fff; }
 
 .foto-vorschau { display: grid; gap: 8px; }
 .foto-vorschau[hidden] { display: none; }
@@ -337,3 +343,115 @@ body {
 @media (min-width: 700px) {
   .formular, .detail, .liste { max-width: 680px; width: 100%; margin-left: auto; margin-right: auto; }
 }
+
+/* ---------- Etappe 2: Reiter, Filter, Liste, Erledigt ---------- */
+
+.aktionen.spalte { flex-direction: column; gap: 8px; }
+.knopf.breit { flex: 2; }
+.knopf.haupt.erledigt { background: #2e7d32; border-color: #2e7d32; }
+#wieder-oeffnen { width: 100%; }
+
+.reiter { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.reiter a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  border-radius: var(--radius);
+  background: #e3e7e5;
+  color: var(--text-2);
+  font-weight: 600;
+  text-decoration: none;
+}
+.reiter a.aktiv { background: var(--gruen-hell); color: var(--gruen); box-shadow: inset 0 0 0 2px var(--gruen); }
+
+.filter { padding: 12px 16px 0; display: grid; gap: 8px; }
+.filter-reihe { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.filter select {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 10px;
+  border: 1px solid #b9c3be;
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+.filter select.gesetzt { border: 2px solid var(--gruen); background: var(--gruen-hell); font-weight: 600; }
+
+.treffer { padding: 10px 16px 0; color: var(--text-2); font-size: 15px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.link { border: 0; background: none; padding: 8px 0; color: var(--gruen); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+
+.mangel-eintrag { gap: 12px; min-height: 84px; padding: 10px 12px; }
+.mini { flex: none; width: 64px; height: 64px; border-radius: 8px; object-fit: cover; background: #e3e7e5; }
+.mini.leer-bild { display: block; background: repeating-linear-gradient(45deg, #e3e7e5 0 6px, #eef1ef 6px 12px); }
+.eintrag-notiz { color: var(--text-2); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.liste .leer { padding: 32px 8px; }
+
+.karte-umschalter {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 850;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 170px;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+}
+
+.punkt.punkt-erledigt { position: relative; }
+.punkt.punkt-erledigt::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 2px;
+  width: 6px;
+  height: 11px;
+  border: solid #fff;
+  border-width: 0 3px 3px 0;
+  transform: rotate(45deg);
+}
+
+.zusammenfassung { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; background: #fff; border: 1px solid var(--linie); border-radius: var(--radius); }
+.zusammenfassung span { color: var(--text-2); font-size: 15px; }
+
+.vorher-nachher { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.vorher-nachher figure { margin: 0; display: grid; gap: 4px; }
+.vorher-nachher img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: var(--radius); background: #000; cursor: zoom-in; }
+.vorher-nachher .kein-foto { aspect-ratio: 3 / 4; display: flex; align-items: center; justify-content: center; padding: 8px; }
+.vorher-nachher figcaption { text-align: center; font-weight: 600; font-size: 15px; color: var(--text-2); }
+.foto-gross { cursor: zoom-in; }
+
+.foto-voll {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+}
+.foto-voll img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.foto-voll-hinweis { position: absolute; bottom: calc(16px + var(--unten)); left: 0; right: 0; text-align: center; color: #ddd; font-size: 15px; }
+
+.update-hinweis {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  z-index: 2500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 10px 16px;
+  border-radius: var(--radius);
+  background: #24302a;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+.update-hinweis .knopf { flex: none; background: var(--gruen-hell); border-color: var(--gruen-hell); color: var(--gruen); }

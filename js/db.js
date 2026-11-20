@@ -1,8 +1,9 @@
 // Datenhaltung in IndexedDB. Alle Daten bleiben auf dem Gerät.
-// Stores: plaetze, maengel (Index platzId), fotos (Bilddaten getrennt, damit Listen schnell bleiben).
+// Stores: plaetze, maengel (Index platzId), fotos (Bilddaten getrennt, damit Listen schnell bleiben),
+// vorschauen (kleine Bilder für Listen, gleiche id wie das Foto; ab Version 2).
 
 const DB_NAME = 'maengelapp';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -11,6 +12,7 @@ function oeffnen() {
     dbPromise = new Promise((resolve, reject) => {
       const anfrage = indexedDB.open(DB_NAME, DB_VERSION);
       anfrage.onupgradeneeded = () => {
+        // Nur Stores ergänzen, nie bestehende Daten löschen
         const db = anfrage.result;
         if (!db.objectStoreNames.contains('plaetze')) {
           db.createObjectStore('plaetze', { keyPath: 'id' });
@@ -22,10 +24,18 @@ function oeffnen() {
         if (!db.objectStoreNames.contains('fotos')) {
           db.createObjectStore('fotos', { keyPath: 'id' });
         }
+        if (!db.objectStoreNames.contains('vorschauen')) {
+          db.createObjectStore('vorschauen', { keyPath: 'id' });
+        }
       };
-      anfrage.onsuccess = () => resolve(anfrage.result);
+      anfrage.onsuccess = () => {
+        const db = anfrage.result;
+        // Eine neuere Version der App will umstellen: Verbindung freigeben
+        db.onversionchange = () => { db.close(); dbPromise = null; };
+        resolve(db);
+      };
       anfrage.onerror = () => reject(anfrage.error);
-      anfrage.onblocked = () => reject(new Error('Datenbank ist blockiert. Bitte andere Fenster der App schliessen.'));
+      anfrage.onblocked = () => console.warn('Datenbank-Umstellung wartet, bis andere Fenster der App geschlossen sind.');
     });
     dbPromise.catch(() => { dbPromise = null; });
   }
@@ -33,7 +43,7 @@ function oeffnen() {
 }
 
 // Führt fn(transaktion) aus. fn darf nur IndexedDB-Anfragen absetzen (keine anderen await),
-// damit die Transaktion nicht vorzeitig endet. Rückgabe: Wert aus fn nach Abschluss.
+// damit die Transaktion nicht vorzeitig endet. Rückgabe: ergebnis.wert nach Abschluss.
 async function transaktion(stores, modus, fn) {
   const db = await oeffnen();
   return new Promise((resolve, reject) => {
@@ -79,20 +89,29 @@ export function platzSpeichern(platz) {
   const jetzt = new Date().toISOString();
   const p = { ...platz, geaendert: jetzt };
   if (!p.id) { p.id = neueId(); p.erstellt = jetzt; }
-  return transaktion(['plaetze'], 'readwrite', (tx, e) => {
+  return transaktion(['plaetze'], 'readwrite', (tx) => {
     tx.objectStore('plaetze').put(p);
-    e.wert = p;
   }).then(() => p);
+}
+
+const FOTO_FELDER = ['fotoId', 'fotoNachherId'];
+
+function fotosEntfernen(tx, mangel) {
+  for (const feld of FOTO_FELDER) {
+    if (mangel[feld]) {
+      tx.objectStore('fotos').delete(mangel[feld]);
+      tx.objectStore('vorschauen').delete(mangel[feld]);
+    }
+  }
 }
 
 // Löscht den Platz mit allen Mängeln und deren Fotos.
 export function platzLoeschen(platzId) {
-  return transaktion(['plaetze', 'maengel', 'fotos'], 'readwrite', (tx) => {
+  return transaktion(['plaetze', 'maengel', 'fotos', 'vorschauen'], 'readwrite', (tx) => {
     const maengel = tx.objectStore('maengel');
-    const fotos = tx.objectStore('fotos');
     maengel.index('platzId').getAll(platzId).onsuccess = (ev) => {
       for (const m of ev.target.result) {
-        if (m.fotoId) fotos.delete(m.fotoId);
+        fotosEntfernen(tx, m);
         maengel.delete(m.id);
       }
     };
@@ -100,33 +119,54 @@ export function platzLoeschen(platzId) {
   });
 }
 
-// Speichert einen Mangel. foto = { daten: ArrayBuffer, typ, breite, hoehe } oder null (Foto unverändert).
-// fotoEntfernen = true löscht ein bestehendes Foto ohne Ersatz.
-export function mangelSpeichern(mangel, foto, fotoEntfernen = false) {
+// Speichert einen Mangel samt Fotoänderungen.
+// fotos = { fotoId: { neu, entfernen }, fotoNachherId: { neu, entfernen } }
+//   neu = { daten: ArrayBuffer, typ, breite, hoehe, groesse, vorschau: { daten, typ } } oder null
+//   entfernen = true löscht ein bestehendes Foto ohne Ersatz
+export function mangelSpeichern(mangel, fotos = {}) {
   const jetzt = new Date().toISOString();
   const m = { ...mangel, geaendert: jetzt };
   if (!m.id) { m.id = neueId(); m.erstellt = jetzt; }
-  const altesFoto = m.fotoId || null;
-  return transaktion(['maengel', 'fotos'], 'readwrite', (tx) => {
-    const fotos = tx.objectStore('fotos');
-    if (foto) {
-      const fotoId = neueId();
-      fotos.put({ id: fotoId, ...foto, erstellt: jetzt });
-      if (altesFoto) fotos.delete(altesFoto);
-      m.fotoId = fotoId;
-    } else if (fotoEntfernen && altesFoto) {
-      fotos.delete(altesFoto);
-      m.fotoId = null;
+  return transaktion(['maengel', 'fotos', 'vorschauen'], 'readwrite', (tx) => {
+    const fotoStore = tx.objectStore('fotos');
+    const vorschauStore = tx.objectStore('vorschauen');
+    for (const feld of FOTO_FELDER) {
+      const aenderung = fotos[feld];
+      if (!aenderung) continue;
+      const alt = m[feld] || null;
+      if (aenderung.neu) {
+        const { vorschau, ...foto } = aenderung.neu;
+        const id = neueId();
+        fotoStore.put({ id, ...foto, erstellt: jetzt });
+        if (vorschau) vorschauStore.put({ id, ...vorschau });
+        if (alt) { fotoStore.delete(alt); vorschauStore.delete(alt); }
+        m[feld] = id;
+      } else if (aenderung.entfernen && alt) {
+        fotoStore.delete(alt);
+        vorschauStore.delete(alt);
+        m[feld] = null;
+      }
     }
     tx.objectStore('maengel').put(m);
   }).then(() => m);
 }
 
 export function mangelLoeschen(mangel) {
-  return transaktion(['maengel', 'fotos'], 'readwrite', (tx) => {
-    if (mangel.fotoId) tx.objectStore('fotos').delete(mangel.fotoId);
+  return transaktion(['maengel', 'fotos', 'vorschauen'], 'readwrite', (tx) => {
+    fotosEntfernen(tx, mangel);
     tx.objectStore('maengel').delete(mangel.id);
   });
+}
+
+// Liefert das kleine Vorschaubild. Fehlt es (Fotos aus Etappe 1), wird es mit erzeugen(foto) erstellt.
+export async function vorschauHolen(fotoId, erzeugen) {
+  const vorhanden = await holen('vorschauen', fotoId);
+  if (vorhanden) return vorhanden;
+  const foto = await holen('fotos', fotoId);
+  if (!foto) return null;
+  const v = { id: fotoId, ...(await erzeugen(foto)) };
+  await transaktion(['vorschauen'], 'readwrite', (tx) => { tx.objectStore('vorschauen').put(v); });
+  return v;
 }
 
 // Bittet den Browser, die Daten nicht automatisch zu löschen (wichtig v. a. auf dem iPhone).

@@ -27,7 +27,11 @@ export function karteErstellen(element, { lat, lng, zoom }, optionen = {}) {
   if (!einfach) L.control.layers({ Luftbild: luftbild, Karte: landeskarte }, null, { position: 'topright' }).addTo(karte);
   karte.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
 
-  requestAnimationFrame(() => karte.invalidateSize());
+  // Grösse neu messen, sobald die Ansicht gezeichnet ist (nicht mehr, falls schon verlassen)
+  requestAnimationFrame(() => {
+    if (!element.isConnected) return;
+    try { karte.invalidateSize(); } catch (_) { /* Karte schon entfernt */ }
+  });
   return karte;
 }
 

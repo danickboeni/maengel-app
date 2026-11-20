@@ -1,7 +1,7 @@
 // Mängel-App Sportplatz – Bildschirme und Navigation
 /* global L */
 import * as db from './db.js';
-import { verkleinern, alsUrl } from './foto.js';
+import { verkleinern, vorschauAusFoto, alsUrl } from './foto.js';
 import { SCHWEIZ, karteErstellen, karteEntfernen, pinHtml, punktIcon, gpsBeobachten, distanz } from './karte.js';
 
 export const KATEGORIEN = [
@@ -10,10 +10,11 @@ export const KATEGORIEN = [
 ];
 
 export const DRINGLICHKEIT = {
-  hoch: { text: 'hoch', farbe: '#d32f2f' },
-  mittel: { text: 'mittel', farbe: '#f57c00' },
-  tief: { text: 'tief', farbe: '#f2b600' },
+  hoch: { text: 'hoch', farbe: '#d32f2f', rang: 0 },
+  mittel: { text: 'mittel', farbe: '#f57c00', rang: 1 },
+  tief: { text: 'tief', farbe: '#f2b600', rang: 2 },
 };
+const ERLEDIGT_FARBE = '#2e7d32';
 
 const ansicht = document.getElementById('ansicht');
 const titelEl = document.getElementById('titel');
@@ -31,6 +32,11 @@ function datum(iso) {
   return new Date(iso).toLocaleString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function kurzdatum(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 let meldungTimer = null;
 function meldung(text, fehler = false) {
   const el = document.getElementById('meldung');
@@ -43,6 +49,32 @@ function meldung(text, fehler = false) {
 
 function anzahlText(n) {
   return n === 1 ? '1 Mangel' : `${n} Mängel`;
+}
+
+function dringlichkeit(m) {
+  return DRINGLICHKEIT[m.dringlichkeit] || DRINGLICHKEIT.mittel;
+}
+
+function istErledigt(m) { return m.status === 'erledigt'; }
+
+// Kleine Einstellungen pro Gerät (Filter usw.). Fehlt der Speicher, gelten die Standardwerte.
+function einstellungLesen(name, standard) {
+  try {
+    const wert = localStorage.getItem(name);
+    return wert === null ? standard : JSON.parse(wert);
+  } catch (_) { return standard; }
+}
+function einstellungSchreiben(name, wert) {
+  try { localStorage.setItem(name, JSON.stringify(wert)); } catch (_) { /* egal */ }
+}
+
+// Foto gross anzeigen; Tippen schliesst
+function grossAnzeigen(url) {
+  const el = document.createElement('div');
+  el.className = 'foto-voll';
+  el.innerHTML = `<img alt="Foto gross" src="${url}"><span class="foto-voll-hinweis">Tippen zum Schliessen</span>`;
+  el.addEventListener('click', () => el.remove());
+  document.body.append(el);
 }
 
 // ---------- Navigation ----------
@@ -59,6 +91,7 @@ export function gehe(hash) { location.hash = hash; }
 // Ersetzt den aktuellen Eintrag (z. B. nach dem Speichern eines Formulars).
 function ersetze(hash) {
   aktuelleAnsicht.schutz = null;
+  if (aktuellerHash() === hash) { zeigen(); return; }
   naechsteErsetzt = true;
   location.replace(hash);
 }
@@ -73,6 +106,12 @@ function zurueckZu(hash) {
   } else {
     ersetze(hash);
   }
+}
+
+// Vorherige Ansicht, falls es eine Mängel-Liste war (dann führt «Zurück» dorthin)
+function vorherigeListe() {
+  const vorher = verlauf[verlauf.length - 2];
+  return vorher && vorher.startsWith('#/maengel') ? vorher : null;
 }
 
 function kopf(titel, zurueck, aktion) {
@@ -96,19 +135,25 @@ function kopf(titel, zurueck, aktion) {
 function beimVerlassen(fn) { aktuelleAnsicht.aufraeumen.push(fn); }
 function schutz(fn) { aktuelleAnsicht.schutz = fn; }
 
+// Nach einem await prüfen, ob die Ansicht inzwischen gewechselt hat
+function nochAktuell(token) { return token === aktuelleAnsicht; }
+
 const routen = [
   [/^#\/?$/, () => plaetzeListe()],
+  [/^#\/maengel(?:\?(.*))?$/, (m) => maengelListe(m[1])],
   [/^#\/platz\/neu$/, () => platzFormular(null)],
   [/^#\/platz\/([\w-]+)\/bearbeiten$/, (m) => platzFormular(m[1])],
   [/^#\/platz\/([\w-]+)\/mangel\/neu$/, (m) => mangelFormular({ platzId: m[1] })],
   [/^#\/platz\/([\w-]+)$/, (m) => platzAnsicht(m[1])],
   [/^#\/mangel\/([\w-]+)\/bearbeiten$/, (m) => mangelFormular({ mangelId: m[1] })],
+  [/^#\/mangel\/([\w-]+)\/erledigt$/, (m) => erledigtFormular(m[1])],
   [/^#\/mangel\/([\w-]+)$/, (m) => mangelAnsicht(m[1])],
 ];
 
 async function zeigen() {
   for (const fn of aktuelleAnsicht.aufraeumen) { try { fn(); } catch (_) { /* egal */ } }
-  aktuelleAnsicht = { aufraeumen: [], schutz: null };
+  const token = { aufraeumen: [], schutz: null };
+  aktuelleAnsicht = token;
   ansicht.innerHTML = '';
   ansicht.className = '';
   ansicht.scrollTop = 0;
@@ -120,7 +165,9 @@ async function zeigen() {
         await fn(m);
       } catch (e) {
         console.error(e);
-        ansicht.innerHTML = `<div class="leer"><p>Fehler: ${esc(e.message)}</p><a class="knopf" href="#/">Zur Übersicht</a></div>`;
+        if (nochAktuell(token)) {
+          ansicht.innerHTML = `<div class="leer"><p>Fehler: ${esc(e.message)}</p><a class="knopf" href="#/">Zur Übersicht</a></div>`;
+        }
       }
       return;
     }
@@ -128,7 +175,7 @@ async function zeigen() {
   ersetze('#/');
 }
 
-window.addEventListener('hashchange', (ev) => {
+window.addEventListener('hashchange', () => {
   const neu = aktuellerHash();
   const alt = verlauf[verlauf.length - 1];
   if (aktuelleAnsicht.schutz && !aktuelleAnsicht.schutz()) {
@@ -145,24 +192,103 @@ window.addEventListener('hashchange', (ev) => {
     if (idx >= 0) verlauf.length = idx + 1;
     else if (neu !== alt) verlauf.push(neu);
   }
-  void ev;
   zeigen();
 });
+
+// Reiter unten (Plätze / Mängel): Wechsel ohne neuen Verlaufseintrag
+ansicht.addEventListener('click', (ev) => {
+  const a = ev.target.closest('a[data-reiter]');
+  if (!a) return;
+  ev.preventDefault();
+  ersetze(a.getAttribute('href'));
+});
+
+function reiterHtml(aktiv, knopf = '') {
+  return `<div class="aktionen spalte">
+    ${knopf}
+    <nav class="reiter" aria-label="Bereiche">
+      <a href="#/" data-reiter class="${aktiv === 'plaetze' ? 'aktiv' : ''}" ${aktiv === 'plaetze' ? 'aria-current="page"' : ''}>Plätze</a>
+      <a href="#/maengel" data-reiter class="${aktiv === 'maengel' ? 'aktiv' : ''}" ${aktiv === 'maengel' ? 'aria-current="page"' : ''}>Mängel</a>
+    </nav>
+  </div>`;
+}
+
+// ---------- Baustein: Fotofeld (aufnehmen, Galerie, Vorschau, entfernen) ----------
+
+function fotoFeldHtml(titel) {
+  return `<div class="feld foto-feld">
+    <span>${titel}</span>
+    <div class="foto-vorschau" hidden><img alt="Foto"><button type="button" class="knopf klein foto-weg">Foto entfernen</button></div>
+    <div class="knopf-reihe">
+      <label class="knopf">Foto aufnehmen<input type="file" accept="image/*" capture="environment" class="foto-kamera" hidden></label>
+      <label class="knopf">Aus Galerie<input type="file" accept="image/*" class="foto-galerie" hidden></label>
+    </div>
+    <span class="hinweis foto-status"></span>
+  </div>`;
+}
+
+// Liefert { aenderung() } → { neu, entfernen } für db.mangelSpeichern
+function fotoFeldAktivieren(el, bestehend, { beiAenderung, knopf }) {
+  let neu = null;
+  let entfernen = false;
+  let url = null;
+  const vorschau = el.querySelector('.foto-vorschau');
+  const status = el.querySelector('.foto-status');
+  function zeige(foto) {
+    if (url) URL.revokeObjectURL(url);
+    url = foto ? alsUrl(foto) : null;
+    vorschau.hidden = !foto;
+    if (foto) vorschau.querySelector('img').src = url;
+  }
+  beimVerlassen(() => { if (url) URL.revokeObjectURL(url); });
+  zeige(bestehend);
+
+  async function gewaehlt(ev) {
+    const datei = ev.target.files && ev.target.files[0];
+    ev.target.value = '';
+    if (!datei) return;
+    knopf.disabled = true;
+    status.textContent = 'Foto wird verkleinert …';
+    try {
+      neu = await verkleinern(datei);
+      entfernen = false;
+      zeige(neu);
+      status.textContent = `${neu.breite} × ${neu.hoehe} px, ${Math.round(neu.groesse / 1024)} KB`;
+      beiAenderung();
+    } catch (e) {
+      status.textContent = '';
+      meldung(e.message, true);
+    } finally {
+      knopf.disabled = false;
+    }
+  }
+  for (const inp of el.querySelectorAll('input[type=file]')) inp.addEventListener('change', gewaehlt);
+  el.querySelector('.foto-weg').onclick = () => {
+    neu = null;
+    entfernen = true;
+    zeige(null);
+    status.textContent = '';
+    beiAenderung();
+  };
+  return { aenderung: () => ({ neu, entfernen }) };
+}
 
 // ---------- Ansicht: Plätze ----------
 
 async function plaetzeListe() {
+  const token = aktuelleAnsicht;
   kopf('Plätze', null, null);
   const [plaetze, maengel] = await Promise.all([db.alle('plaetze'), db.alle('maengel')]);
+  if (!nochAktuell(token)) return;
   plaetze.sort((a, b) => a.name.localeCompare(b.name, 'de-CH'));
   const zaehler = {};
   for (const m of maengel) {
-    const z = zaehler[m.platzId] || (zaehler[m.platzId] = { total: 0, hoch: 0 });
-    z.total += 1;
+    const z = zaehler[m.platzId] || (zaehler[m.platzId] = { offen: 0, hoch: 0, erledigt: 0 });
+    if (istErledigt(m)) { z.erledigt += 1; continue; }
+    z.offen += 1;
     if (m.dringlichkeit === 'hoch') z.hoch += 1;
   }
 
-  ansicht.className = 'mit-aktionen';
   ansicht.innerHTML = `
     ${plaetze.length === 0 ? `
       <div class="leer">
@@ -171,34 +297,160 @@ async function plaetzeListe() {
       </div>` : `
       <ul class="liste">
         ${plaetze.map((p) => {
-          const z = zaehler[p.id] || { total: 0, hoch: 0 };
+          const z = zaehler[p.id] || { offen: 0, hoch: 0, erledigt: 0 };
           return `<li><a class="eintrag" href="#/platz/${p.id}">
             <span class="eintrag-text">
               <span class="eintrag-titel">${esc(p.name)}</span>
               <span class="eintrag-unter">${esc(p.ort || '')}</span>
             </span>
             <span class="eintrag-zahlen">
-              <span>${anzahlText(z.total)}</span>
+              <span>${z.offen} offen${z.erledigt ? ` · ${z.erledigt} erledigt` : ''}</span>
               ${z.hoch ? `<span class="marke" style="background:${DRINGLICHKEIT.hoch.farbe}">${z.hoch} dringend</span>` : ''}
             </span>
           </a></li>`;
         }).join('')}
       </ul>`}
-    <div class="aktionen"><a class="knopf haupt" href="#/platz/neu">+ Platz</a></div>`;
+    ${reiterHtml('plaetze', '<a class="knopf haupt" href="#/platz/neu">+ Platz</a>')}`;
+}
+
+// ---------- Ansicht: alle Mängel mit Filtern ----------
+
+const FILTER_STANDARD = { status: 'offen', platz: '', kategorie: '' };
+
+async function maengelListe(abfrage) {
+  const token = aktuelleAnsicht;
+  const vonPlatz = new URLSearchParams(abfrage || '').get('platz');
+  const [plaetze, maengel] = await Promise.all([db.alle('plaetze'), db.alle('maengel')]);
+  if (!nochAktuell(token)) return;
+  plaetze.sort((a, b) => a.name.localeCompare(b.name, 'de-CH'));
+  const platzName = Object.fromEntries(plaetze.map((p) => [p.id, p.name]));
+
+  const filter = { ...FILTER_STANDARD, ...einstellungLesen('maengel-filter', {}) };
+  if (vonPlatz) filter.platz = vonPlatz;
+  if (filter.platz && !platzName[filter.platz]) filter.platz = '';
+
+  kopf('Mängel', vonPlatz ? `#/platz/${vonPlatz}` : null, null);
+  ansicht.innerHTML = `
+    <div class="filter">
+      <div class="segmente klein" id="f-status" role="group" aria-label="Status">
+        ${[['offen', 'Offen'], ['erledigt', 'Erledigt'], ['alle', 'Alle']].map(([w, t]) => `<button type="button" class="segment" data-wert="${w}">${t}</button>`).join('')}
+      </div>
+      <div class="filter-reihe">
+        <select id="f-platz" aria-label="Platz">
+          <option value="">Alle Plätze</option>
+          ${plaetze.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}
+        </select>
+        <select id="f-kategorie" aria-label="Kategorie">
+          <option value="">Alle Kategorien</option>
+          ${KATEGORIEN.map((k) => `<option value="${esc(k)}">${esc(k)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="treffer" class="treffer" aria-live="polite"></div>
+    <ul class="liste" id="liste"></ul>
+    ${vonPlatz ? '' : reiterHtml('maengel')}`;
+
+  const statusEl = document.getElementById('f-status');
+  const platzEl = document.getElementById('f-platz');
+  const kategorieEl = document.getElementById('f-kategorie');
+  const listeEl = document.getElementById('liste');
+  const trefferEl = document.getElementById('treffer');
+
+  // Vorschaubilder: einmal laden, beim Verlassen freigeben
+  const urls = new Map();
+  beimVerlassen(() => { for (const u of urls.values()) URL.revokeObjectURL(u); });
+  let ladeLauf = 0;
+  async function vorschauenLaden() {
+    const lauf = ++ladeLauf;
+    for (const img of listeEl.querySelectorAll('img[data-foto]')) {
+      const id = img.dataset.foto;
+      if (!urls.has(id)) {
+        try {
+          const v = await db.vorschauHolen(id, vorschauAusFoto);
+          if (v) urls.set(id, alsUrl(v));
+        } catch (e) { console.warn('Vorschau fehlt', e); }
+      }
+      if (lauf !== ladeLauf || !nochAktuell(token)) return;
+      if (urls.has(id)) { img.src = urls.get(id); img.classList.add('geladen'); }
+    }
+  }
+
+  function zeichnen() {
+    for (const b of statusEl.querySelectorAll('button')) {
+      const an = b.dataset.wert === filter.status;
+      b.classList.toggle('aktiv', an);
+      b.setAttribute('aria-pressed', an);
+    }
+    platzEl.value = filter.platz;
+    kategorieEl.value = filter.kategorie;
+    platzEl.classList.toggle('gesetzt', !!filter.platz);
+    kategorieEl.classList.toggle('gesetzt', !!filter.kategorie);
+
+    const treffer = maengel.filter((m) => {
+      if (filter.status === 'offen' && istErledigt(m)) return false;
+      if (filter.status === 'erledigt' && !istErledigt(m)) return false;
+      if (filter.platz && m.platzId !== filter.platz) return false;
+      if (filter.kategorie && m.kategorie !== filter.kategorie) return false;
+      return true;
+    });
+    // Offene zuerst, dann nach Dringlichkeit, dann neueste zuerst
+    treffer.sort((a, b) => (istErledigt(a) - istErledigt(b))
+      || (istErledigt(a) ? 0 : dringlichkeit(a).rang - dringlichkeit(b).rang)
+      || String(b.erledigtAm || b.erstellt).localeCompare(String(a.erledigtAm || a.erstellt)));
+
+    const filterAktiv = filter.platz || filter.kategorie || filter.status !== 'offen';
+    trefferEl.innerHTML = `${anzahlText(treffer.length)}${filterAktiv ? ' <button type="button" class="link" id="f-zuruecksetzen">Filter zurücksetzen</button>' : ''}`;
+    const reset = document.getElementById('f-zuruecksetzen');
+    if (reset) reset.onclick = () => { Object.assign(filter, FILTER_STANDARD); einstellungSchreiben('maengel-filter', filter); zeichnen(); };
+
+    listeEl.innerHTML = treffer.length === 0
+      ? '<li class="leer">Keine Mängel für diese Filter.</li>'
+      : treffer.map((m) => {
+        const d = dringlichkeit(m);
+        const erledigt = istErledigt(m);
+        const bildId = (erledigt && m.fotoNachherId) || m.fotoId;
+        return `<li><a class="eintrag mangel-eintrag" href="#/mangel/${m.id}">
+          ${bildId ? `<img class="mini" data-foto="${bildId}" alt="">` : '<span class="mini leer-bild" aria-hidden="true"></span>'}
+          <span class="eintrag-text">
+            <span class="eintrag-titel">${esc(m.kategorie)}</span>
+            <span class="eintrag-unter">${esc(platzName[m.platzId] || '–')} · ${kurzdatum(erledigt ? m.erledigtAm : m.erstellt)}</span>
+            ${m.notiz ? `<span class="eintrag-notiz">${esc(m.notiz)}</span>` : ''}
+          </span>
+          ${erledigt
+            ? `<span class="marke" style="background:${ERLEDIGT_FARBE}">erledigt</span>`
+            : `<span class="marke" style="background:${d.farbe}">${d.text}</span>`}
+        </a></li>`;
+      }).join('');
+    vorschauenLaden();
+  }
+
+  function aendern(neu) {
+    Object.assign(filter, neu);
+    einstellungSchreiben('maengel-filter', filter);
+    zeichnen();
+  }
+  statusEl.addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-wert]');
+    if (b) aendern({ status: b.dataset.wert });
+  });
+  platzEl.addEventListener('change', () => aendern({ platz: platzEl.value }));
+  kategorieEl.addEventListener('change', () => aendern({ kategorie: kategorieEl.value }));
+  zeichnen();
 }
 
 // ---------- Ansicht: Platz anlegen / bearbeiten ----------
 
 async function platzFormular(platzId) {
+  const token = aktuelleAnsicht;
   let platz = null;
   if (platzId) {
     platz = await db.holen('plaetze', platzId);
     if (!platz) throw new Error('Platz nicht gefunden.');
   }
+  if (!nochAktuell(token)) return;
   const zurueck = platz ? `#/platz/${platz.id}` : '#/';
   kopf(platz ? 'Platz bearbeiten' : 'Neuer Platz', zurueck, null);
 
-  ansicht.className = 'mit-aktionen';
   ansicht.innerHTML = `
     <form id="platz-form" class="formular" novalidate>
       <label class="feld">Name des Platzes
@@ -296,46 +548,80 @@ async function platzFormular(platzId) {
 // ---------- Ansicht: Platz mit Mängeln auf der Karte ----------
 
 async function platzAnsicht(platzId) {
+  const token = aktuelleAnsicht;
   const platz = await db.holen('plaetze', platzId);
   if (!platz) throw new Error('Platz nicht gefunden.');
   const maengel = await db.maengelVonPlatz(platzId);
+  if (!nochAktuell(token)) return;
   kopf(platz.name, '#/', { text: 'Bearbeiten', klick: () => gehe(`#/platz/${platz.id}/bearbeiten`) });
 
-  ansicht.className = 'voll mit-aktionen';
+  const offen = maengel.filter((m) => !istErledigt(m));
+  const erledigtAnzahl = maengel.length - offen.length;
+  let alleZeigen = einstellungLesen('karte-alle', false);
+
+  ansicht.className = 'voll';
   ansicht.innerHTML = `
     <div class="karte-rahmen voll">
       <div id="karte" class="karte"></div>
-      <div class="karte-info">
-        ${maengel.length ? anzahlText(maengel.length) : 'Noch keine Mängel. Tippe auf «+ Mangel».'}
-        ${maengel.length ? `<span class="legende">
-          ${Object.values(DRINGLICHKEIT).map((d) => `<span><i style="background:${d.farbe}"></i>${d.text}</span>`).join('')}
-        </span>` : ''}
+      <div class="karte-umschalter segmente klein" role="group" aria-label="Punkte zeigen">
+        <button type="button" class="segment" data-wert="offen">Offen</button>
+        <button type="button" class="segment" data-wert="alle">Alle</button>
       </div>
+      <div class="karte-info" id="karte-info"></div>
     </div>
-    <div class="aktionen"><a class="knopf haupt" href="#/platz/${platz.id}/mangel/neu">+ Mangel</a></div>`;
+    <div class="aktionen">
+      <a class="knopf" href="#/maengel?platz=${platz.id}">Liste</a>
+      <a class="knopf haupt breit" href="#/platz/${platz.id}/mangel/neu">+ Mangel</a>
+    </div>`;
 
   const karte = karteErstellen(document.getElementById('karte'), { lat: platz.lat, lng: platz.lng, zoom: platz.zoom || 18 });
   beimVerlassen(() => karteEntfernen(karte));
+  const ebene = L.layerGroup().addTo(karte);
 
-  // Dringende Punkte zuletzt zeichnen, damit sie oben liegen
-  const reihenfolge = { tief: 0, mittel: 1, hoch: 2 };
-  const sortiert = [...maengel].sort((a, b) => (reihenfolge[a.dringlichkeit] ?? 0) - (reihenfolge[b.dringlichkeit] ?? 0));
-  for (const m of sortiert) {
-    const farbe = (DRINGLICHKEIT[m.dringlichkeit] || DRINGLICHKEIT.mittel).farbe;
-    L.marker([m.lat, m.lng], { icon: punktIcon(farbe, m.status === 'erledigt'), title: m.kategorie, keyboard: true })
-      .on('click', () => gehe(`#/mangel/${m.id}`))
-      .addTo(karte);
+  function zeichnen() {
+    for (const b of ansicht.querySelectorAll('.karte-umschalter button')) {
+      const an = (b.dataset.wert === 'alle') === alleZeigen;
+      b.classList.toggle('aktiv', an);
+      b.setAttribute('aria-pressed', an);
+    }
+    ebene.clearLayers();
+    const sichtbar = alleZeigen ? maengel : offen;
+    // Erledigte zuerst, dann nach Dringlichkeit: dringende Punkte liegen oben
+    const sortiert = [...sichtbar].sort((a, b) => (istErledigt(b) - istErledigt(a)) || (dringlichkeit(b).rang - dringlichkeit(a).rang));
+    for (const m of sortiert) {
+      const erledigt = istErledigt(m);
+      L.marker([m.lat, m.lng], {
+        icon: punktIcon(erledigt ? ERLEDIGT_FARBE : dringlichkeit(m).farbe, erledigt),
+        title: `${m.kategorie}${erledigt ? ' (erledigt)' : ''}`,
+        keyboard: true,
+      }).on('click', () => gehe(`#/mangel/${m.id}`)).addTo(ebene);
+    }
+    const legende = [...Object.values(DRINGLICHKEIT), ...(alleZeigen ? [{ text: 'erledigt', farbe: ERLEDIGT_FARBE }] : [])];
+    document.getElementById('karte-info').innerHTML = maengel.length
+      ? `${offen.length} offen${erledigtAnzahl ? ` · ${erledigtAnzahl} erledigt` : ''}
+        <span class="legende">${legende.map((d) => `<span><i style="background:${d.farbe}"></i>${d.text}</span>`).join('')}</span>`
+      : 'Noch keine Mängel. Tippe auf «+ Mangel».';
   }
+  ansicht.querySelector('.karte-umschalter').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-wert]');
+    if (!b) return;
+    alleZeigen = b.dataset.wert === 'alle';
+    einstellungSchreiben('karte-alle', alleZeigen);
+    zeichnen();
+  });
+  zeichnen();
+
   if (maengel.length) {
     const grenzen = L.latLngBounds(maengel.map((m) => [m.lat, m.lng]));
     grenzen.extend([platz.lat, platz.lng]);
-    karte.fitBounds(grenzen, { padding: [40, 40], maxZoom: Math.max(platz.zoom || 18, 19) });
+    karte.fitBounds(grenzen, { padding: [50, 50], maxZoom: Math.max(platz.zoom || 18, 19) });
   }
 }
 
 // ---------- Ansicht: Mangel erfassen / bearbeiten ----------
 
 async function mangelFormular({ platzId, mangelId }) {
+  const token = aktuelleAnsicht;
   let mangel = null;
   if (mangelId) {
     mangel = await db.holen('maengel', mangelId);
@@ -344,13 +630,13 @@ async function mangelFormular({ platzId, mangelId }) {
   }
   const platz = await db.holen('plaetze', platzId);
   if (!platz) throw new Error('Platz nicht gefunden.');
+  const bestehendesFoto = mangel?.fotoId ? await db.holen('fotos', mangel.fotoId) : null;
+  if (!nochAktuell(token)) return;
   const zurueck = mangel ? `#/mangel/${mangel.id}` : `#/platz/${platz.id}`;
   kopf(mangel ? 'Mangel bearbeiten' : 'Neuer Mangel', zurueck, null);
 
-  const bestehendesFoto = mangel?.fotoId ? await db.holen('fotos', mangel.fotoId) : null;
   const wahl = { kategorie: mangel?.kategorie || '', dringlichkeit: mangel?.dringlichkeit || 'mittel' };
 
-  ansicht.className = 'mit-aktionen';
   ansicht.innerHTML = `
     <form id="mangel-form" class="formular" novalidate>
       <div class="feld">
@@ -364,15 +650,7 @@ async function mangelFormular({ platzId, mangelId }) {
         <span id="gps-status" class="hinweis"></span>
       </div>
 
-      <div class="feld">
-        <span>Foto</span>
-        <div id="foto-vorschau" class="foto-vorschau" hidden><img alt="Foto des Mangels"><button type="button" id="foto-weg" class="knopf klein">Foto entfernen</button></div>
-        <div class="knopf-reihe">
-          <label class="knopf">Foto aufnehmen<input type="file" accept="image/*" capture="environment" id="foto-kamera" hidden></label>
-          <label class="knopf">Aus Galerie<input type="file" accept="image/*" id="foto-galerie" hidden></label>
-        </div>
-        <span id="foto-status" class="hinweis"></span>
-      </div>
+      ${fotoFeldHtml(mangel && istErledigt(mangel) ? 'Foto vorher' : 'Foto')}
 
       <fieldset class="feld">
         <legend>Kategorie</legend>
@@ -384,7 +662,7 @@ async function mangelFormular({ platzId, mangelId }) {
       <fieldset class="feld">
         <legend>Dringlichkeit</legend>
         <div class="segmente" id="dringlichkeit">
-          ${Object.entries(DRINGLICHKEIT).map(([wert, d]) => `<button type="button" class="segment${wahl.dringlichkeit === wert ? ' aktiv' : ''}" data-wert="${wert}" style="--farbe:${d.farbe}" aria-pressed="${wahl.dringlichkeit === wert}">${d.text}</button>`).join('')}
+          ${Object.entries(DRINGLICHKEIT).map(([wert, d]) => `<button type="button" class="segment farbig${wahl.dringlichkeit === wert ? ' aktiv' : ''}" data-wert="${wert}" style="--farbe:${d.farbe}" aria-pressed="${wahl.dringlichkeit === wert}">${d.text}</button>`).join('')}
         </div>
       </fieldset>
 
@@ -395,6 +673,7 @@ async function mangelFormular({ platzId, mangelId }) {
     <div class="aktionen"><button type="submit" form="mangel-form" class="knopf haupt" id="speichern">Speichern</button></div>`;
 
   const form = document.getElementById('mangel-form');
+  const speichernKnopf = document.getElementById('speichern');
   let geaendert = false;
   const markiere = () => { geaendert = true; };
   form.addEventListener('input', markiere);
@@ -437,49 +716,7 @@ async function mangelFormular({ platzId, mangelId }) {
   else status.textContent = 'Gespeicherte Stelle. «Zum GPS» springt zu deiner Position.';
 
   // --- Foto ---
-  let neuesFoto = null;
-  let fotoEntfernen = false;
-  let fotoUrl = null;
-  const vorschau = document.getElementById('foto-vorschau');
-  const fotoStatus = document.getElementById('foto-status');
-  function vorschauZeigen(foto) {
-    if (fotoUrl) URL.revokeObjectURL(fotoUrl);
-    fotoUrl = foto ? alsUrl(foto) : null;
-    vorschau.hidden = !foto;
-    if (foto) vorschau.querySelector('img').src = fotoUrl;
-  }
-  beimVerlassen(() => { if (fotoUrl) URL.revokeObjectURL(fotoUrl); });
-  vorschauZeigen(bestehendesFoto);
-
-  async function fotoGewaehlt(ev) {
-    const datei = ev.target.files && ev.target.files[0];
-    ev.target.value = '';
-    if (!datei) return;
-    const knopf = document.getElementById('speichern');
-    knopf.disabled = true;
-    fotoStatus.textContent = 'Foto wird verkleinert …';
-    try {
-      neuesFoto = await verkleinern(datei);
-      fotoEntfernen = false;
-      vorschauZeigen(neuesFoto);
-      fotoStatus.textContent = `${neuesFoto.breite} × ${neuesFoto.hoehe} px, ${Math.round(neuesFoto.groesse / 1024)} KB`;
-      markiere();
-    } catch (e) {
-      fotoStatus.textContent = '';
-      meldung(e.message, true);
-    } finally {
-      knopf.disabled = false;
-    }
-  }
-  document.getElementById('foto-kamera').addEventListener('change', fotoGewaehlt);
-  document.getElementById('foto-galerie').addEventListener('change', fotoGewaehlt);
-  document.getElementById('foto-weg').onclick = () => {
-    neuesFoto = null;
-    fotoEntfernen = true;
-    vorschauZeigen(null);
-    fotoStatus.textContent = '';
-    markiere();
-  };
+  const fotoFeld = fotoFeldAktivieren(form.querySelector('.foto-feld'), bestehendesFoto, { beiAenderung: markiere, knopf: speichernKnopf });
 
   // --- Auswahl Kategorie / Dringlichkeit ---
   function auswahl(containerId, feld) {
@@ -508,8 +745,7 @@ async function mangelFormular({ platzId, mangelId }) {
       return;
     }
     const mitte = karte.getCenter();
-    const knopf = document.getElementById('speichern');
-    knopf.disabled = true;
+    speichernKnopf.disabled = true;
     try {
       const gespeichert = await db.mangelSpeichern({
         ...(mangel || { status: 'offen', platzId: platz.id, fotoId: null }),
@@ -519,11 +755,62 @@ async function mangelFormular({ platzId, mangelId }) {
         kategorie: wahl.kategorie,
         dringlichkeit: wahl.dringlichkeit,
         notiz: form.notiz.value.trim(),
-      }, neuesFoto, fotoEntfernen);
+      }, { fotoId: fotoFeld.aenderung() });
       db.dauerhaftAnfragen();
       meldung('Mangel gespeichert');
       if (mangel) zurueckZu(`#/mangel/${gespeichert.id}`);
       else zurueckZu(`#/platz/${platz.id}`);
+    } catch (e) {
+      speichernKnopf.disabled = false;
+      meldung(`Speichern fehlgeschlagen: ${e.message}`, true);
+    }
+  });
+}
+
+// ---------- Ansicht: Mangel als erledigt melden ----------
+
+async function erledigtFormular(mangelId) {
+  const token = aktuelleAnsicht;
+  const mangel = await db.holen('maengel', mangelId);
+  if (!mangel) throw new Error('Mangel nicht gefunden.');
+  const platz = await db.holen('plaetze', mangel.platzId);
+  const bestehend = mangel.fotoNachherId ? await db.holen('fotos', mangel.fotoNachherId) : null;
+  if (!nochAktuell(token)) return;
+  kopf('Erledigt melden', `#/mangel/${mangel.id}`, null);
+
+  ansicht.innerHTML = `
+    <form id="erledigt-form" class="formular" novalidate>
+      <div class="zusammenfassung">
+        <strong>${esc(mangel.kategorie)}</strong>
+        <span>${esc(platz?.name || '')}${mangel.notiz ? ` · ${esc(mangel.notiz)}` : ''}</span>
+      </div>
+      ${fotoFeldHtml('Foto «nachher» (freiwillig)')}
+      <label class="feld">Was wurde gemacht? (freiwillig)
+        <textarea name="erledigtNotiz" rows="3" maxlength="1000" placeholder="z. B. Belag geflickt, Netz ersetzt …">${esc(mangel.erledigtNotiz)}</textarea>
+      </label>
+    </form>
+    <div class="aktionen"><button type="submit" form="erledigt-form" class="knopf haupt erledigt" id="speichern">Als erledigt speichern</button></div>`;
+
+  const form = document.getElementById('erledigt-form');
+  const knopf = document.getElementById('speichern');
+  let geaendert = false;
+  const markiere = () => { geaendert = true; };
+  form.addEventListener('input', markiere);
+  schutz(() => !geaendert || confirm('Erledigt-Meldung verwerfen?'));
+  const fotoFeld = fotoFeldAktivieren(form.querySelector('.foto-feld'), bestehend, { beiAenderung: markiere, knopf });
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    knopf.disabled = true;
+    try {
+      await db.mangelSpeichern({
+        ...mangel,
+        status: 'erledigt',
+        erledigtAm: new Date().toISOString(),
+        erledigtNotiz: form.erledigtNotiz.value.trim(),
+      }, { fotoNachherId: fotoFeld.aenderung() });
+      meldung('Als erledigt gemeldet');
+      zurueckZu(`#/mangel/${mangel.id}`);
     } catch (e) {
       knopf.disabled = false;
       meldung(`Speichern fehlgeschlagen: ${e.message}`, true);
@@ -534,56 +821,119 @@ async function mangelFormular({ platzId, mangelId }) {
 // ---------- Ansicht: Mangel ansehen ----------
 
 async function mangelAnsicht(mangelId) {
+  const token = aktuelleAnsicht;
   const mangel = await db.holen('maengel', mangelId);
   if (!mangel) throw new Error('Mangel nicht gefunden.');
-  const platz = await db.holen('plaetze', mangel.platzId);
-  const foto = mangel.fotoId ? await db.holen('fotos', mangel.fotoId) : null;
-  const d = DRINGLICHKEIT[mangel.dringlichkeit] || DRINGLICHKEIT.mittel;
-  kopf(mangel.kategorie, `#/platz/${mangel.platzId}`, null);
+  const erledigt = istErledigt(mangel);
+  const [platz, foto, nachher] = await Promise.all([
+    db.holen('plaetze', mangel.platzId),
+    mangel.fotoId ? db.holen('fotos', mangel.fotoId) : null,
+    erledigt && mangel.fotoNachherId ? db.holen('fotos', mangel.fotoNachherId) : null,
+  ]);
+  if (!nochAktuell(token)) return;
+  const d = dringlichkeit(mangel);
+  const zurueck = vorherigeListe() || `#/platz/${mangel.platzId}`;
+  kopf(mangel.kategorie, zurueck, null);
 
-  ansicht.className = 'mit-aktionen';
+  let fotosHtml;
+  if (nachher) {
+    fotosHtml = `<div class="vorher-nachher">
+      <figure>${foto ? '<img data-foto="vorher" alt="Foto vorher">' : '<div class="kein-foto">Kein Foto</div>'}<figcaption>Vorher</figcaption></figure>
+      <figure><img data-foto="nachher" alt="Foto nachher"><figcaption>Nachher</figcaption></figure>
+    </div>`;
+  } else if (foto) {
+    fotosHtml = '<img data-foto="vorher" class="foto-gross" alt="Foto des Mangels">';
+  } else {
+    fotosHtml = '<div class="kein-foto">Kein Foto</div>';
+  }
+
   ansicht.innerHTML = `
     <div class="detail">
-      ${foto ? '<img id="foto" class="foto-gross" alt="Foto des Mangels">' : '<div class="kein-foto">Kein Foto</div>'}
+      ${fotosHtml}
       <div class="detail-zeile">
+        ${erledigt ? `<span class="marke" style="background:${ERLEDIGT_FARBE}">erledigt</span>` : '<span class="marke neutral">offen</span>'}
         <span class="marke" style="background:${d.farbe}">Dringlichkeit ${d.text}</span>
-        <span class="marke neutral">${mangel.status === 'erledigt' ? 'erledigt' : 'offen'}</span>
       </div>
       <dl class="angaben">
         <dt>Platz</dt><dd>${esc(platz?.name || '–')}</dd>
         <dt>Kategorie</dt><dd>${esc(mangel.kategorie)}</dd>
         <dt>Notiz</dt><dd class="notiz">${mangel.notiz ? esc(mangel.notiz) : '–'}</dd>
         <dt>Erfasst</dt><dd>${datum(mangel.erstellt)}</dd>
-        ${mangel.geaendert !== mangel.erstellt ? `<dt>Geändert</dt><dd>${datum(mangel.geaendert)}</dd>` : ''}
+        ${erledigt ? `<dt>Erledigt</dt><dd>${datum(mangel.erledigtAm)}</dd>
+          <dt>Gemacht</dt><dd class="notiz">${mangel.erledigtNotiz ? esc(mangel.erledigtNotiz) : '–'}</dd>` : ''}
         <dt>GPS beim Erfassen</dt><dd>${mangel.gps ? `± ${mangel.gps.genauigkeit} m` : 'keine Position'}</dd>
       </dl>
       <div class="karte-rahmen klein"><div id="karte" class="karte"></div></div>
+      ${erledigt ? '<button type="button" id="wieder-oeffnen" class="knopf breit">Wieder öffnen</button>' : ''}
       <button type="button" id="loeschen" class="knopf gefahr">Mangel löschen</button>
     </div>
-    <div class="aktionen"><a class="knopf haupt" href="#/mangel/${mangel.id}/bearbeiten">Bearbeiten</a></div>`;
+    <div class="aktionen">
+      ${erledigt
+        ? `<a class="knopf haupt" href="#/mangel/${mangel.id}/bearbeiten">Bearbeiten</a>`
+        : `<a class="knopf" href="#/mangel/${mangel.id}/bearbeiten">Bearbeiten</a>
+           <a class="knopf haupt erledigt breit" href="#/mangel/${mangel.id}/erledigt">Erledigt melden</a>`}
+    </div>`;
 
-  if (foto) {
-    const url = alsUrl(foto);
-    document.getElementById('foto').src = url;
+  for (const [teil, f] of [['vorher', foto], ['nachher', nachher]]) {
+    const img = ansicht.querySelector(`img[data-foto="${teil}"]`);
+    if (!img || !f) continue;
+    const url = alsUrl(f);
+    img.src = url;
+    img.addEventListener('click', () => grossAnzeigen(url));
     beimVerlassen(() => URL.revokeObjectURL(url));
   }
+  beimVerlassen(() => { for (const el of document.querySelectorAll('.foto-voll')) el.remove(); });
+
+  const farbe = erledigt ? ERLEDIGT_FARBE : d.farbe;
   const karte = karteErstellen(document.getElementById('karte'), { lat: mangel.lat, lng: mangel.lng, zoom: 19 }, { einfach: true });
-  L.marker([mangel.lat, mangel.lng], { icon: punktIcon(d.farbe), interactive: false }).addTo(karte);
+  L.marker([mangel.lat, mangel.lng], { icon: punktIcon(farbe, erledigt), interactive: false }).addTo(karte);
   beimVerlassen(() => karteEntfernen(karte));
 
+  if (erledigt) {
+    document.getElementById('wieder-oeffnen').onclick = async () => {
+      if (!confirm('Diesen Mangel wieder als offen markieren?')) return;
+      await db.mangelSpeichern({ ...mangel, status: 'offen', erledigtAm: null });
+      meldung('Mangel ist wieder offen');
+      zeigen();
+    };
+  }
+
   document.getElementById('loeschen').onclick = async () => {
-    if (!confirm(foto ? 'Diesen Mangel mit Foto endgültig löschen?' : 'Diesen Mangel endgültig löschen?')) return;
+    const mitFoto = mangel.fotoId || mangel.fotoNachherId;
+    if (!confirm(mitFoto ? 'Diesen Mangel mit Fotos endgültig löschen?' : 'Diesen Mangel endgültig löschen?')) return;
     await db.mangelLoeschen(mangel);
     meldung('Mangel gelöscht');
-    zurueckZu(`#/platz/${mangel.platzId}`);
+    zurueckZu(zurueck);
   };
 }
 
-// ---------- Start ----------
+// ---------- Neue Version ----------
+
+function updateHinweis() {
+  if (document.getElementById('update-hinweis')) return;
+  const el = document.createElement('div');
+  el.id = 'update-hinweis';
+  el.className = 'update-hinweis';
+  el.setAttribute('role', 'status');
+  el.innerHTML = '<span>Neue Version der App bereit.</span><button type="button" class="knopf klein">Aktualisieren</button>';
+  el.querySelector('button').onclick = () => {
+    if (aktuelleAnsicht.schutz && !aktuelleAnsicht.schutz()) return;
+    location.reload();
+  };
+  document.body.append(el);
+}
 
 if ('serviceWorker' in navigator) {
+  // Hatte die Seite schon einen Service Worker, ist ein Wechsel eine neue Version
+  const hatteVersion = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hatteVersion) updateHinweis(); });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service Worker nicht registriert:', e));
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      // Beim Zurückkehren in die App nach neuer Version fragen
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    }).catch((e) => console.warn('Service Worker nicht registriert:', e));
   });
 }
 

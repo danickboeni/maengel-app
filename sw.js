@@ -2,7 +2,7 @@
 // Kartenkacheln werden (noch) nicht gespeichert – das folgt in Etappe 3.
 // Bei jeder Änderung an App-Dateien VERSION erhöhen.
 
-const VERSION = 'maengel-v1';
+const VERSION = 'maengel-v2';
 const DATEIEN = [
   './',
   'index.html',
@@ -26,7 +26,7 @@ const DATEIEN = [
 ];
 
 self.addEventListener('install', (ev) => {
-  ev.waitUntil(caches.open(VERSION).then((c) => c.addAll(DATEIEN)).then(() => self.skipWaiting()));
+  ev.waitUntil(caches.open(VERSION).then((c) => c.addAll(DATEIEN.map((d) => new Request(d, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (ev) => {
