@@ -2,19 +2,19 @@
 /* global L */
 import * as db from './db.js';
 import { verkleinern, vorschauAusFoto, alsUrl } from './foto.js';
-import { SCHWEIZ, karteErstellen, karteEntfernen, pinHtml, punktIcon, gpsBeobachten, distanz } from './karte.js';
+import {
+  SCHWEIZ, karteErstellen, karteEntfernen, pinHtml, punktIcon, gpsBeobachten, distanz,
+  offlineSpeichern, kachelAnzahl, kachelnLoeschen, OFFLINE_RADIUS,
+} from './karte.js';
+import {
+  KATEGORIEN, DRINGLICHKEIT, ERLEDIGT_FARBE, istErledigt, dringlichkeit, maengelSortieren,
+} from './konstanten.js';
+import {
+  sicherungErstellen, sicherungWeitergeben, sicherungPruefen, sicherungEinlesen, sicherungFaellig,
+  letzteSicherung, speicherInfo, groesseText, dateiWeitergeben, ERINNERUNG_TAGE,
+} from './sicherung.js';
+import { berichtErstellen } from './bericht.js';
 
-export const KATEGORIEN = [
-  'Belag / Kunstrasen', 'Naturrasen', 'Linierung', 'Tore / Netze', 'Zaun / Ballfang',
-  'Entwässerung', 'Beleuchtung', 'Ausstattung', 'Sonstiges',
-];
-
-export const DRINGLICHKEIT = {
-  hoch: { text: 'hoch', farbe: '#d32f2f', rang: 0 },
-  mittel: { text: 'mittel', farbe: '#f57c00', rang: 1 },
-  tief: { text: 'tief', farbe: '#f2b600', rang: 2 },
-};
-const ERLEDIGT_FARBE = '#2e7d32';
 
 const ansicht = document.getElementById('ansicht');
 const titelEl = document.getElementById('titel');
@@ -51,11 +51,6 @@ function anzahlText(n) {
   return n === 1 ? '1 Mangel' : `${n} Mängel`;
 }
 
-function dringlichkeit(m) {
-  return DRINGLICHKEIT[m.dringlichkeit] || DRINGLICHKEIT.mittel;
-}
-
-function istErledigt(m) { return m.status === 'erledigt'; }
 
 // Kleine Einstellungen pro Gerät (Filter usw.). Fehlt der Speicher, gelten die Standardwerte.
 function einstellungLesen(name, standard) {
@@ -141,6 +136,8 @@ function nochAktuell(token) { return token === aktuelleAnsicht; }
 const routen = [
   [/^#\/?$/, () => plaetzeListe()],
   [/^#\/maengel(?:\?(.*))?$/, (m) => maengelListe(m[1])],
+  [/^#\/sicherung$/, () => sicherungAnsicht()],
+  [/^#\/platz\/([\w-]+)\/bericht$/, (m) => berichtAnsicht(m[1])],
   [/^#\/platz\/neu$/, () => platzFormular(null)],
   [/^#\/platz\/([\w-]+)\/bearbeiten$/, (m) => platzFormular(m[1])],
   [/^#\/platz\/([\w-]+)\/mangel\/neu$/, (m) => mangelFormular({ platzId: m[1] })],
@@ -209,6 +206,7 @@ function reiterHtml(aktiv, knopf = '') {
     <nav class="reiter" aria-label="Bereiche">
       <a href="#/" data-reiter class="${aktiv === 'plaetze' ? 'aktiv' : ''}" ${aktiv === 'plaetze' ? 'aria-current="page"' : ''}>Plätze</a>
       <a href="#/maengel" data-reiter class="${aktiv === 'maengel' ? 'aktiv' : ''}" ${aktiv === 'maengel' ? 'aria-current="page"' : ''}>Mängel</a>
+      <a href="#/sicherung" data-reiter class="${aktiv === 'sicherung' ? 'aktiv' : ''}${sicherungFaellig() ? ' faellig' : ''}" ${aktiv === 'sicherung' ? 'aria-current="page"' : ''}>Sicherung</a>
     </nav>
   </div>`;
 }
@@ -289,7 +287,20 @@ async function plaetzeListe() {
     if (m.dringlichkeit === 'hoch') z.hoch += 1;
   }
 
+  // Daten aus früheren Versionen haben noch keine Änderungszeit: jetzt setzen, damit die Erinnerung greift
+  if ((plaetze.length || maengel.length) && einstellungLesen('letzte-aenderung-gesetzt', null) === null) {
+    try { if (!localStorage.getItem('letzte-aenderung')) db.aenderungMerken(); } catch (_) { /* egal */ }
+    einstellungSchreiben('letzte-aenderung-gesetzt', true);
+  }
+  const letzte = letzteSicherung();
+  const erinnerung = sicherungFaellig() && (plaetze.length || maengel.length)
+    ? `<a class="erinnerung" href="#/sicherung" data-reiter>
+        <strong>Sicherung fällig</strong>
+        <span>${letzte ? `Letzte Sicherung am ${kurzdatum(letzte)}.` : 'Du hast noch nie gesichert.'} Tippe hier, um deine Daten zu sichern.</span>
+      </a>`
+    : '';
   ansicht.innerHTML = `
+    ${erinnerung}
     ${plaetze.length === 0 ? `
       <div class="leer">
         <p><strong>Noch keine Plätze.</strong></p>
@@ -393,10 +404,7 @@ async function maengelListe(abfrage) {
       if (filter.kategorie && m.kategorie !== filter.kategorie) return false;
       return true;
     });
-    // Offene zuerst, dann nach Dringlichkeit, dann neueste zuerst
-    treffer.sort((a, b) => (istErledigt(a) - istErledigt(b))
-      || (istErledigt(a) ? 0 : dringlichkeit(a).rang - dringlichkeit(b).rang)
-      || String(b.erledigtAm || b.erstellt).localeCompare(String(a.erledigtAm || a.erstellt)));
+    const sortiert = maengelSortieren(treffer);
 
     const filterAktiv = filter.platz || filter.kategorie || filter.status !== 'offen';
     trefferEl.innerHTML = `${anzahlText(treffer.length)}${filterAktiv ? ' <button type="button" class="link" id="f-zuruecksetzen">Filter zurücksetzen</button>' : ''}`;
@@ -405,7 +413,7 @@ async function maengelListe(abfrage) {
 
     listeEl.innerHTML = treffer.length === 0
       ? '<li class="leer">Keine Mängel für diese Filter.</li>'
-      : treffer.map((m) => {
+      : sortiert.map((m) => {
         const d = dringlichkeit(m);
         const erledigt = istErledigt(m);
         const bildId = (erledigt && m.fotoNachherId) || m.fotoId;
@@ -571,6 +579,7 @@ async function platzAnsicht(platzId) {
     </div>
     <div class="aktionen">
       <a class="knopf" href="#/maengel?platz=${platz.id}">Liste</a>
+      <a class="knopf" href="#/platz/${platz.id}/bericht">Bericht</a>
       <a class="knopf haupt breit" href="#/platz/${platz.id}/mangel/neu">+ Mangel</a>
     </div>`;
 
@@ -601,7 +610,50 @@ async function platzAnsicht(platzId) {
       ? `${offen.length} offen${erledigtAnzahl ? ` · ${erledigtAnzahl} erledigt` : ''}
         <span class="legende">${legende.map((d) => `<span><i style="background:${d.farbe}"></i>${d.text}</span>`).join('')}</span>`
       : 'Noch keine Mängel. Tippe auf «+ Mangel».';
+    document.getElementById('karte-info').insertAdjacentHTML('beforeend', offlineZeile());
   }
+
+  // Luftbild rund um den Platz für den Einsatz ohne Empfang speichern
+  const offlineSchluessel = `offline-${platz.id}`;
+  let offlineLaeuft = false;
+  let offlineAbbrechen = false;
+  beimVerlassen(() => { offlineAbbrechen = true; });
+  function offlineZeile() {
+    const am = einstellungLesen(offlineSchluessel, null);
+    return `<span class="offline-zeile">
+      <span id="offline-text">${am ? `Karte offline gespeichert am ${kurzdatum(am)}` : 'Karte noch nicht offline gespeichert'}</span>
+      <button type="button" class="link" id="offline-knopf">${am ? 'Neu laden' : 'Offline speichern'}</button>
+    </span>`;
+  }
+  document.getElementById('karte-info').addEventListener('click', async (ev) => {
+    if (!ev.target.closest('#offline-knopf')) return;
+    if (offlineLaeuft) { offlineAbbrechen = true; return; }
+    offlineLaeuft = true;
+    offlineAbbrechen = false;
+    const knopf = document.getElementById('offline-knopf');
+    knopf.textContent = 'Abbrechen';
+    const text = () => document.getElementById('offline-text');
+    try {
+      const ergebnis = await offlineSpeichern(platz, (n, total) => {
+        if (text()) text().textContent = `Karte wird gespeichert: ${Math.round((n / total) * 100)} %`;
+      }, () => offlineAbbrechen);
+      if (!nochAktuell(token)) return;
+      if (ergebnis.abgebrochen) {
+        meldung('Speichern abgebrochen');
+      } else if (ergebnis.fehler > ergebnis.total * 0.1) {
+        meldung(`Karte nur teilweise gespeichert (${ergebnis.fehler} Teile fehlen). Später nochmals versuchen.`, true);
+      } else {
+        einstellungSchreiben(offlineSchluessel, new Date().toISOString());
+        meldung(`Karte im Umkreis von ${OFFLINE_RADIUS} m offline gespeichert`);
+        db.dauerhaftAnfragen();
+      }
+    } catch (e) {
+      meldung(e.message, true);
+    } finally {
+      offlineLaeuft = false;
+      if (nochAktuell(token)) zeichnen();
+    }
+  });
   ansicht.querySelector('.karte-umschalter').addEventListener('click', (ev) => {
     const b = ev.target.closest('button[data-wert]');
     if (!b) return;
@@ -905,6 +957,209 @@ async function mangelAnsicht(mangelId) {
     meldung('Mangel gelöscht');
     zurueckZu(zurueck);
   };
+}
+
+// ---------- Ansicht: Sicherung ----------
+
+async function sicherungAnsicht() {
+  const token = aktuelleAnsicht;
+  const [plaetze, maengel, fotoIds, speicher, kacheln] = await Promise.all([
+    db.alle('plaetze'), db.alle('maengel'), db.schluessel('fotos'), speicherInfo(), kachelAnzahl().catch(() => 0),
+  ]);
+  if (!nochAktuell(token)) return;
+  kopf('Sicherung', null, null);
+  const letzte = letzteSicherung();
+  const faellig = sicherungFaellig();
+
+  ansicht.innerHTML = `
+    <div class="formular">
+      <section class="karte-block${faellig ? ' warnung' : ''}">
+        <h2>Daten sichern</h2>
+        <p class="status-zeile">${letzte ? `Letzte Sicherung: <strong>${datum(letzte)}</strong>` : '<strong>Noch keine Sicherung erstellt.</strong>'}</p>
+        <p class="hinweis">Auf diesem Gerät: ${plaetze.length} Plätze, ${anzahlText(maengel.length)}, ${fotoIds.length} Fotos.
+          Die Daten liegen nur auf diesem Handy. Sichere sie regelmässig und speichere die Datei an einem sicheren Ort
+          (z. B. «In Dateien sichern» → iCloud Drive oder OneDrive, oder per Mail an dich).</p>
+        <button type="button" class="knopf haupt" id="sichern">Sicherung erstellen</button>
+        <button type="button" class="link" id="herunterladen">Stattdessen als Datei herunterladen</button>
+        <span class="hinweis" id="sichern-status"></span>
+      </section>
+
+      <section class="karte-block">
+        <h2>Sicherung einlesen</h2>
+        <p class="hinweis">Liest eine Sicherungsdatei ein. Was auf dem Gerät ist, bleibt erhalten; gibt es einen Eintrag in beiden,
+          gilt der neuere Stand. So kannst du auch Daten von einem anderen Handy übernehmen.</p>
+        <label class="knopf">Datei auswählen<input type="file" accept=".json,application/json" id="einlesen-datei" hidden></label>
+        <span class="hinweis" id="einlesen-status"></span>
+      </section>
+
+      <section class="karte-block">
+        <h2>Speicher</h2>
+        <dl class="angaben einfach">
+          <dt>Belegt</dt><dd>${groesseText(speicher.belegt)}</dd>
+          <dt>Vor Löschen geschützt</dt><dd>${speicher.geschuetzt == null ? 'unbekannt' : speicher.geschuetzt ? 'ja' : 'nein – App über den Startbildschirm nutzen'}</dd>
+          <dt>Offline-Karte</dt><dd>${kacheln} Kartenteile</dd>
+        </dl>
+        ${kacheln ? '<button type="button" class="knopf" id="kacheln-loeschen">Offline-Karten löschen</button>' : ''}
+      </section>
+    </div>
+    ${reiterHtml('sicherung')}`;
+
+  const status = document.getElementById('sichern-status');
+  async function sichern(herunterladen) {
+    const knopf = document.getElementById('sichern');
+    knopf.disabled = true;
+    status.textContent = 'Sicherung wird erstellt …';
+    try {
+      const s = await sicherungErstellen((n, total) => { status.textContent = `Fotos werden verpackt: ${n} von ${total} …`; });
+      status.textContent = `Datei bereit (${groesseText(s.datei.size)}).`;
+      const ok = await sicherungWeitergeben(s.datei, { herunterladen });
+      if (!nochAktuell(token)) return;
+      if (ok) {
+        meldung('Sicherung erstellt');
+        zeigen();
+      } else {
+        status.textContent = 'Nicht gespeichert. Tippe nochmals auf «Sicherung erstellen».';
+      }
+    } catch (e) {
+      status.textContent = '';
+      meldung(`Sicherung fehlgeschlagen: ${e.message}`, true);
+    } finally {
+      knopf.disabled = false;
+    }
+  }
+  document.getElementById('sichern').onclick = () => sichern(false);
+  document.getElementById('herunterladen').onclick = () => sichern(true);
+
+  const einlesenStatus = document.getElementById('einlesen-status');
+  document.getElementById('einlesen-datei').addEventListener('change', async (ev) => {
+    const datei = ev.target.files && ev.target.files[0];
+    ev.target.value = '';
+    if (!datei) return;
+    einlesenStatus.textContent = 'Datei wird geprüft …';
+    try {
+      const p = await sicherungPruefen(datei);
+      const frage = `Sicherung vom ${datum(p.erstellt)} einlesen?\n\n`
+        + `Plätze: ${p.plaetze.total} (neu ${p.plaetze.neu}, aktueller ${p.plaetze.aktueller})\n`
+        + `Mängel: ${p.maengel.total} (neu ${p.maengel.neu}, aktueller ${p.maengel.aktueller})\n`
+        + `Fotos: ${p.fotos}\n\n`
+        + 'Daten auf diesem Gerät bleiben erhalten.';
+      if (!confirm(frage)) { einlesenStatus.textContent = ''; return; }
+      await sicherungEinlesen(p.daten, (n, total) => { einlesenStatus.textContent = `Fotos werden eingelesen: ${n} von ${total} …`; });
+      db.dauerhaftAnfragen();
+      meldung('Sicherung eingelesen');
+      if (nochAktuell(token)) zeigen();
+    } catch (e) {
+      einlesenStatus.textContent = '';
+      meldung(e.message, true);
+    }
+  });
+
+  const loeschen = document.getElementById('kacheln-loeschen');
+  if (loeschen) {
+    loeschen.onclick = async () => {
+      if (!confirm('Alle offline gespeicherten Karten löschen? Deine Mängel und Fotos bleiben erhalten.')) return;
+      await kachelnLoeschen();
+      try {
+        for (const k of Object.keys(localStorage)) if (k.startsWith('offline-')) localStorage.removeItem(k);
+      } catch (_) { /* egal */ }
+      meldung('Offline-Karten gelöscht');
+      zeigen();
+    };
+  }
+}
+
+// ---------- Ansicht: PDF-Bericht ----------
+
+async function berichtAnsicht(platzId) {
+  const token = aktuelleAnsicht;
+  const platz = await db.holen('plaetze', platzId);
+  if (!platz) throw new Error('Platz nicht gefunden.');
+  const maengel = await db.maengelVonPlatz(platzId);
+  if (!nochAktuell(token)) return;
+  kopf('Bericht', `#/platz/${platz.id}`, null);
+  const offen = maengel.filter((m) => !istErledigt(m)).length;
+  const wahl = { auswahl: 'offen', fotos: true };
+
+  ansicht.innerHTML = `
+    <div class="formular">
+      <div class="zusammenfassung">
+        <strong>${esc(platz.name)}</strong>
+        <span>${platz.ort ? `${esc(platz.ort)} · ` : ''}${offen} offen · ${maengel.length - offen} erledigt</span>
+      </div>
+      <fieldset class="feld">
+        <legend>Welche Mängel?</legend>
+        <div class="segmente klein zwei" id="b-auswahl">
+          <button type="button" class="segment" data-wert="offen">Offene (${offen})</button>
+          <button type="button" class="segment" data-wert="alle">Alle (${maengel.length})</button>
+        </div>
+      </fieldset>
+      <fieldset class="feld">
+        <legend>Fotos im Bericht?</legend>
+        <div class="segmente klein zwei" id="b-fotos">
+          <button type="button" class="segment" data-wert="ja">Mit Fotos</button>
+          <button type="button" class="segment" data-wert="nein">Ohne Fotos</button>
+        </div>
+      </fieldset>
+      <p class="hinweis">Der Bericht enthält einen Plan mit nummerierten Punkten, eine Liste und – falls gewählt – jeden Mangel mit Foto.
+        Für das Luftbild im Plan braucht es Empfang oder eine offline gespeicherte Karte.</p>
+      <span class="hinweis" id="b-status" aria-live="polite"></span>
+      <div id="b-fertig" hidden class="karte-block">
+        <strong id="b-fertig-text"></strong>
+        <div class="knopf-reihe">
+          <button type="button" class="knopf" id="b-teilen">Teilen</button>
+          <button type="button" class="knopf" id="b-laden">Herunterladen</button>
+        </div>
+      </div>
+    </div>
+    <div class="aktionen"><button type="button" class="knopf haupt" id="b-erstellen">PDF erstellen</button></div>`;
+
+  function zeichnen() {
+    for (const [id, wert] of [['b-auswahl', wahl.auswahl], ['b-fotos', wahl.fotos ? 'ja' : 'nein']]) {
+      for (const b of document.getElementById(id).querySelectorAll('button')) {
+        const an = b.dataset.wert === wert;
+        b.classList.toggle('aktiv', an);
+        b.setAttribute('aria-pressed', an);
+      }
+    }
+  }
+  document.getElementById('b-auswahl').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-wert]');
+    if (b) { wahl.auswahl = b.dataset.wert; zeichnen(); }
+  });
+  document.getElementById('b-fotos').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-wert]');
+    if (b) { wahl.fotos = b.dataset.wert === 'ja'; zeichnen(); }
+  });
+  zeichnen();
+
+  let datei = null;
+  const status = document.getElementById('b-status');
+  const knopf = document.getElementById('b-erstellen');
+  knopf.onclick = async () => {
+    knopf.disabled = true;
+    document.getElementById('b-fertig').hidden = true;
+    try {
+      const ergebnis = await berichtErstellen(platz, {
+        auswahl: wahl.auswahl,
+        mitFotos: wahl.fotos,
+        meldung: (t) => { if (nochAktuell(token)) status.textContent = t; },
+      });
+      if (!nochAktuell(token)) return;
+      datei = ergebnis.datei;
+      status.textContent = ergebnis.planFehlend ? 'Hinweis: Das Luftbild im Plan ist unvollständig (kein Empfang?).' : '';
+      document.getElementById('b-fertig-text').textContent = `PDF bereit: ${ergebnis.anzahl} Mängel, ${ergebnis.seiten} Seiten, ${groesseText(datei.size)}`;
+      document.getElementById('b-fertig').hidden = false;
+      await dateiWeitergeben(datei, { titel: `Mängelbericht ${platz.name}` });
+    } catch (e) {
+      console.error(e);
+      status.textContent = '';
+      meldung(`Bericht fehlgeschlagen: ${e.message}`, true);
+    } finally {
+      knopf.disabled = false;
+    }
+  };
+  document.getElementById('b-teilen').onclick = () => { if (datei) dateiWeitergeben(datei, { titel: `Mängelbericht ${platz.name}` }); };
+  document.getElementById('b-laden').onclick = () => { if (datei) dateiWeitergeben(datei, { herunterladen: true }); };
 }
 
 // ---------- Neue Version ----------

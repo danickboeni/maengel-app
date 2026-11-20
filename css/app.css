@@ -351,7 +351,7 @@ body {
 .knopf.haupt.erledigt { background: #2e7d32; border-color: #2e7d32; }
 #wieder-oeffnen { width: 100%; }
 
-.reiter { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.reiter { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .reiter a {
   display: flex;
   align-items: center;
@@ -455,3 +455,64 @@ body {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 .update-hinweis .knopf { flex: none; background: var(--gruen-hell); border-color: var(--gruen-hell); color: var(--gruen); }
+
+/* ---------- Etappe 3: Sicherung, Bericht, Offline ---------- */
+
+.reiter a { position: relative; font-size: 16px; }
+.reiter a.faellig::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--gefahr);
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.erinnerung {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 12px 16px 0;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: #fdecea;
+  border: 1px solid #f3b9b4;
+  color: #7f1d1d;
+  text-decoration: none;
+}
+.erinnerung span { font-size: 15px; }
+
+.karte-block {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid var(--linie);
+  border-radius: var(--radius);
+}
+.karte-block.warnung { border-color: #f3b9b4; box-shadow: inset 4px 0 0 var(--gefahr); }
+.karte-block h2 { margin: 0; font-size: 18px; }
+.karte-block p { margin: 0; }
+.karte-block .link { justify-self: start; }
+.status-zeile { font-size: 16px; }
+
+.angaben.einfach { padding: 0; border: 0; background: none; }
+
+.segmente.zwei { grid-template-columns: 1fr 1fr; }
+
+.offline-zeile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 10px;
+  margin-top: 4px;
+  font-weight: 400;
+  font-size: 14px;
+  color: var(--text-2);
+}
+.offline-zeile .link { padding: 6px 0; font-size: 14px; }
+
+.aktionen .knopf { padding: 0 12px; }

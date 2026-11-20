@@ -62,6 +62,11 @@ async function transaktion(stores, modus, fn) {
   });
 }
 
+// Zeitpunkt der letzten Änderung (für die Sicherungs-Erinnerung)
+export function aenderungMerken() {
+  try { localStorage.setItem('letzte-aenderung', new Date().toISOString()); } catch (_) { /* egal */ }
+}
+
 export function neueId() {
   if (crypto.randomUUID) return crypto.randomUUID();
   return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -91,7 +96,7 @@ export function platzSpeichern(platz) {
   if (!p.id) { p.id = neueId(); p.erstellt = jetzt; }
   return transaktion(['plaetze'], 'readwrite', (tx) => {
     tx.objectStore('plaetze').put(p);
-  }).then(() => p);
+  }).then(() => { aenderungMerken(); return p; });
 }
 
 const FOTO_FELDER = ['fotoId', 'fotoNachherId'];
@@ -116,7 +121,7 @@ export function platzLoeschen(platzId) {
       }
     };
     tx.objectStore('plaetze').delete(platzId);
-  });
+  }).then(aenderungMerken);
 }
 
 // Speichert einen Mangel samt Fotoänderungen.
@@ -148,14 +153,14 @@ export function mangelSpeichern(mangel, fotos = {}) {
       }
     }
     tx.objectStore('maengel').put(m);
-  }).then(() => m);
+  }).then(() => { aenderungMerken(); return m; });
 }
 
 export function mangelLoeschen(mangel) {
   return transaktion(['maengel', 'fotos', 'vorschauen'], 'readwrite', (tx) => {
     fotosEntfernen(tx, mangel);
     tx.objectStore('maengel').delete(mangel.id);
-  });
+  }).then(aenderungMerken);
 }
 
 // Liefert das kleine Vorschaubild. Fehlt es (Fotos aus Etappe 1), wird es mit erzeugen(foto) erstellt.
@@ -178,4 +183,47 @@ export async function dauerhaftAnfragen() {
     }
   } catch (_) { /* nicht unterstützt */ }
   return false;
+}
+
+export function schluessel(store) {
+  return transaktion([store], 'readonly', (tx, e) => {
+    tx.objectStore(store).getAllKeys().onsuccess = (ev) => { e.wert = ev.target.result; };
+  });
+}
+
+// Übernimmt Daten aus einer Sicherung. Bestehendes bleibt; bei gleicher id gewinnt der neuere Stand.
+// Danach werden Fotos gelöscht, die zu keinem Mangel mehr gehören.
+export function importieren({ plaetze, maengel, fotos }) {
+  return transaktion(['plaetze', 'maengel', 'fotos', 'vorschauen'], 'readwrite', (tx) => {
+    const ps = tx.objectStore('plaetze');
+    const ms = tx.objectStore('maengel');
+    const fs = tx.objectStore('fotos');
+    const vs = tx.objectStore('vorschauen');
+    const neuer = (alt, neu) => !alt || String(neu.geaendert || '') > String(alt.geaendert || '');
+    for (const p of plaetze) {
+      ps.get(p.id).onsuccess = (ev) => { if (neuer(ev.target.result, p)) ps.put(p); };
+    }
+    for (const f of fotos) {
+      fs.getKey(f.id).onsuccess = (ev) => { if (ev.target.result === undefined) fs.put(f); };
+    }
+    let offen = maengel.length;
+    const aufraeumen = () => {
+      // Alle Mängel lesen und nicht mehr benutzte Fotos entfernen
+      ms.getAll().onsuccess = (ev) => {
+        const benutzt = new Set();
+        for (const m of ev.target.result) for (const feld of FOTO_FELDER) if (m[feld]) benutzt.add(m[feld]);
+        fs.getAllKeys().onsuccess = (ev2) => {
+          for (const id of ev2.target.result) if (!benutzt.has(id)) { fs.delete(id); vs.delete(id); }
+        };
+      };
+    };
+    if (offen === 0) aufraeumen();
+    for (const m of maengel) {
+      ms.get(m.id).onsuccess = (ev) => {
+        if (neuer(ev.target.result, m)) ms.put(m);
+        offen -= 1;
+        if (offen === 0) aufraeumen();
+      };
+    }
+  }).then(aenderungMerken);
 }

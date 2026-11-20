@@ -20,7 +20,8 @@ export function karteErstellen(element, { lat, lng, zoom }, optionen = {}) {
     ...leafletOptionen,
   }).setView([lat, lng], zoom);
 
-  const gemeinsam = { attribution: '© <a href="https://www.swisstopo.admin.ch" target="_blank" rel="noopener">swisstopo</a>', bounds: GRENZEN, maxZoom: 21 };
+  // crossOrigin: damit der Service Worker die Kacheln für offline speichern kann
+  const gemeinsam = { attribution: '© <a href="https://www.swisstopo.admin.ch" target="_blank" rel="noopener">swisstopo</a>', bounds: GRENZEN, maxZoom: 21, crossOrigin: true };
   const luftbild = L.tileLayer(wmts('ch.swisstopo.swissimage', 'jpeg'), { ...gemeinsam, maxNativeZoom: 20 });
   const landeskarte = L.tileLayer(wmts('ch.swisstopo.pixelkarte-farbe', 'jpeg'), { ...gemeinsam, maxNativeZoom: 19 });
   luftbild.addTo(karte);
@@ -96,4 +97,79 @@ export function distanz(a, b) {
   const dLng = (b.lng - a.lng) * rad;
   const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+// ---------- Kacheln: Umrechnung, Offline-Speicher ----------
+
+export const LUFTBILD = wmts('ch.swisstopo.swissimage', 'jpeg');
+export const KACHEL_CACHE = 'kacheln-v1'; // gleicher Name wie in sw.js
+
+export function kachelUrl(z, x, y) {
+  return LUFTBILD.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+}
+
+// Position in Weltpixeln (256er-Kacheln) bei Zoomstufe z
+export function weltPixel(lat, lng, z) {
+  const n = 256 * 2 ** z;
+  const r = (lat * Math.PI) / 180;
+  return {
+    x: ((lng + 180) / 360) * n,
+    y: ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n,
+  };
+}
+
+// Alle Luftbild-Kacheln im Umkreis (Meter) um einen Punkt, für die Zoomstufen zVon..zBis
+export function kachelnUmPunkt(lat, lng, radius, zVon = 13, zBis = 20) {
+  const dLat = radius / 111320;
+  const dLng = radius / (111320 * Math.cos((lat * Math.PI) / 180));
+  const urls = [];
+  for (let z = zVon; z <= zBis; z += 1) {
+    const a = weltPixel(lat + dLat, lng - dLng, z);
+    const b = weltPixel(lat - dLat, lng + dLng, z);
+    for (let x = Math.floor(a.x / 256); x <= Math.floor(b.x / 256); x += 1) {
+      for (let y = Math.floor(a.y / 256); y <= Math.floor(b.y / 256); y += 1) urls.push(kachelUrl(z, x, y));
+    }
+  }
+  return urls;
+}
+
+export const OFFLINE_RADIUS = 300;
+
+// Lädt das Luftbild rund um den Platz in den Offline-Speicher.
+// fortschritt(erledigt, total), abbrechen() → true bricht ab. Liefert { total, fehler }.
+export async function offlineSpeichern(platz, fortschritt = () => {}, abbrechen = () => false) {
+  if (!('caches' in window)) throw new Error('Dieses Gerät kann keine Karten offline speichern.');
+  const cache = await caches.open(KACHEL_CACHE);
+  const urls = kachelnUmPunkt(platz.lat, platz.lng, OFFLINE_RADIUS);
+  let erledigt = 0;
+  let fehler = 0;
+  let index = 0;
+  async function arbeiter() {
+    while (index < urls.length && !abbrechen()) {
+      const url = urls[index++];
+      try {
+        if (!(await cache.match(url))) {
+          const antwort = await fetch(url, { mode: 'cors' });
+          if (antwort.ok) await cache.put(url, antwort);
+          else if (antwort.status !== 404 && antwort.status !== 400) fehler += 1;
+        }
+      } catch (_) {
+        fehler += 1;
+      }
+      erledigt += 1;
+      fortschritt(erledigt, urls.length);
+    }
+  }
+  await Promise.all(Array.from({ length: 6 }, arbeiter));
+  return { total: urls.length, fehler, abgebrochen: abbrechen() };
+}
+
+export async function kachelAnzahl() {
+  if (!('caches' in window)) return 0;
+  const cache = await caches.open(KACHEL_CACHE);
+  return (await cache.keys()).length;
+}
+
+export async function kachelnLoeschen() {
+  if ('caches' in window) await caches.delete(KACHEL_CACHE);
 }
