@@ -28,6 +28,17 @@ Mitarbeitende erfassen Mängel und Schadstellen auf Sportplätzen mit Foto und g
 - **PDF «Aufnahme für Offerte»:** Kunde, Plan mit nummerierten Flächen/Linien, Positionsliste, Fotos.
 - Offerten sind Teil der Sicherung. Kundendaten bleiben auf dem Handy und in den Sicherungsdateien.
 
+## Erweiterung: Markierungsplan (freigegeben am 21.11.2026)
+- Dritter Weg auf dem Startbildschirm: **«Markierungsplan»**, eigene Seite `markierung.html`.
+- **Eigenständig:** kein Bezug zu Plätzen, Mängeln oder Offerten.
+- **Plan:** Platzgrösse und Belag festlegen, Felder nach Sportart und Normstufe setzen (Basketball, Volleyball, Handball, Unihockey, Streetball, Fussball inkl. Junioren G–D, Sprintbahn, Weitsprung, Ballwurf, Kugel), dann alles von Hand verschieben, drehen und anpassen.
+- **Normen:** Unter die tiefste Stufe gehen ist erlaubt, gibt aber eine Warnung. Sicherheitszonen nach BASPO bis zum Rand des Belags; Verletzung = Warnung, kein Verbot.
+- **Priorität pro Feld:** Linien des Hauptfelds laufen durch, untergeordnete Felder werden an Kreuzungen unterbrochen.
+- **Ausgabe:** Browserdruck / PDF mit Gesamtplan, Lagemassen, Detailblatt pro Feld zum Einmessen und Mengen; dazu DXF, SVG und CSV.
+- **Bedienung:** voll am PC und Tablet. Auf dem Handy nur ansehen (Plan, Warnungen, Mengen, Druck).
+- Pläne liegen in IndexedDB (Store `markierungsplaene`) und sind Teil der Sicherung (Format 3). Einzelne Pläne lassen sich zusätzlich als Datei speichern und öffnen.
+- Annahmen ohne Quelle sind in der App gekennzeichnet (z. B. Kugelstoss-Masse, Tiefe der Technischen Zone).
+
 ## Technik
 - Progressive Web-App (zum Startbildschirm hinzufügen), plain HTML/CSS/JavaScript ohne Build-Werkzeuge.
 - Daten in IndexedDB; Fotos werden verkleinert.
@@ -45,6 +56,7 @@ Mitarbeitende erfassen Mängel und Schadstellen auf Sportplätzen mit Foto und g
 2. Übersicht, Filter und «Erledigt»
 3. PDF-Bericht, Sicherung und Offline-Karte
 4. Startbildschirm und Offerte aufnehmen (mit Messen und PDF)
+5. Markierungsplan (Zeichnen, Prüfen, Druck, Sicherung)
 
 ## Tests
 - Am PC im Browser (lokal).

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="de-CH">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Markierungspläne</title>
+  <meta name="theme-color" content="#1f6f3a">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/markierung.css">
+</head>
+<body>
+
+<!-- ===== Liste der Markierungspläne ===== -->
+<div id="liste">
+  <div class="liste-kopf">
+    <a class="btn zurueck" href="index.html#/">← App</a>
+    <h1>Markierungspläne</h1>
+  </div>
+  <div class="liste-inhalt">
+    <p class="hinweis-handy">Auf dem Handy kannst du Pläne ansehen, Warnungen prüfen und das PDF holen. Bearbeiten geht am PC oder Tablet.</p>
+    <div class="liste-knoepfe">
+      <button class="btn primary nur-pc" id="lNeu">Neuer Plan</button>
+      <button class="btn nur-pc" id="lBeispiel">Beispiel anlegen</button>
+      <button class="btn" id="lOeffnen">Plan aus Datei öffnen</button>
+    </div>
+    <ul id="plan-liste"></ul>
+  </div>
+</div>
+
+<!-- ===== Planer ===== -->
+<div id="planer">
+<header>
+  <a class="btn zurueck" href="#/" title="Zurück zur Liste der Pläne">← Pläne</a>
+  <input id="projName" title="Name des Plans" spellcheck="false">
+  <div class="sep"></div>
+  <button class="btn" id="bSave" title="Plan als Datei speichern, z.B. zum Weitergeben (Ctrl+S)">Als Datei</button>
+  <details class="menu" id="mExport"><summary class="btn">Ausgabe ▾</summary>
+    <div class="pop">
+      <button data-exp="print">Plan drucken / als PDF</button>
+      <button data-exp="dxf">DXF für CAD (Meter)</button>
+      <button data-exp="svg">SVG (Vektorgrafik)</button>
+      <button data-exp="csv">Mengenliste (CSV)</button>
+      <button data-exp="pts">Einbauteile mit Koordinaten (CSV)</button>
+    </div>
+  </details>
+  <div class="sep nur-pc"></div>
+  <button class="btn nur-pc" id="bUndo" title="Rückgängig (Ctrl+Z)">↶</button>
+  <button class="btn nur-pc" id="bRedo" title="Wiederholen (Ctrl+Y)">↷</button>
+  <span class="wcount" id="wcount" title="Warnungen anzeigen"></span>
+  <div class="spacer"></div>
+  <label class="tog"><input type="checkbox" id="sGrid"> Raster</label>
+  <label class="tog"><input type="checkbox" id="sSafety"> Sicherheitszonen</label>
+  <label class="tog"><input type="checkbox" id="sDims"> Abstände</label>
+  <label class="tog"><input type="checkbox" id="sNotes"> Beschriftung</label>
+  <label class="tog nur-pc"><input type="checkbox" id="sGaps"> Kreuzungen unterbrechen</label>
+  <label class="tog"><input type="checkbox" id="sThick"> Linien betonen</label>
+  <label class="tog nur-pc">Fang <select id="sSnap"><option value="0">aus</option><option value="0.01">1 cm</option><option value="0.05">5 cm</option><option value="0.1">10 cm</option><option value="0.5">50 cm</option><option value="1">1 m</option></select></label>
+</header>
+
+<div id="app">
+  <aside id="left">
+    <section class="nur-pc">
+      <h3>1 · Platz</h3>
+      <div class="g2">
+        <label class="fld"><span>Länge <em>(m)</em></span><input type="number" id="pL" step="0.5" min="5" max="300"></label>
+        <label class="fld"><span>Breite <em>(m)</em></span><input type="number" id="pB" step="0.5" min="5" max="300"></label>
+      </div>
+      <label class="fld"><span>Belag</span><select id="pBelag"></select></label>
+      <div class="small muted">Der Belagsrand ist die Grenze für alle Prüfungen.</div>
+    </section>
+    <section class="nur-pc">
+      <h3>2 · Feld hinzufügen</h3>
+      <label class="fld"><span>Sportart</span><select id="addSport"></select></label>
+      <label class="fld"><span>Normstufe</span><select id="addStufe"></select></label>
+      <div class="small muted" id="addInfo" style="margin-bottom:8px"></div>
+      <button class="btn primary wide" id="bAdd">Feld auf den Platz setzen</button>
+    </section>
+    <section>
+      <h3>Felder im Plan</h3>
+      <div id="list"></div>
+    </section>
+    <section class="nur-pc">
+      <details><summary class="small">Bedienung</summary>
+        <ul class="help">
+          <li>Feld anklicken = auswählen, ziehen = verschieben</li>
+          <li>Nochmals klicken = darunterliegendes Feld wählen</li>
+          <li>Runder Griff = drehen (15°-Schritte, Shift = 1°)</li>
+          <li>Leere Fläche ziehen = Ansicht verschieben, Mausrad oder zwei Finger = Zoom</li>
+          <li>Pfeiltasten = 10 cm verschieben (Shift: 1 m)</li>
+          <li><kbd>R</kbd> / <kbd>Shift</kbd>+<kbd>R</kbd> = 90° drehen, <kbd>Ctrl</kbd>+<kbd>D</kbd> = duplizieren, <kbd>Entf</kbd> = löschen</li>
+          <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> = rückgängig / wiederholen, <kbd>F</kbd> = Platz einpassen</li>
+          <li>Koordinaten: ab Platzecke oben links, X nach rechts, Y nach unten</li>
+          <li>Der Plan wird automatisch gespeichert.</li>
+        </ul>
+      </details>
+    </section>
+  </aside>
+
+  <main id="stage">
+    <svg id="svg" xmlns="http://www.w3.org/2000/svg"><g id="vp"><g id="content"></g><g id="overlay"></g></g></svg>
+    <div class="hud bl"><div id="scalebar"><div class="bar"></div><span></span></div></div>
+    <div class="hud br" id="coords"></div>
+    <div class="hud tr"><button id="zIn" title="Vergrössern">+</button><button id="zOut" title="Verkleinern">−</button><button id="zFit" title="Platz einpassen (F)">⤢</button></div>
+  </main>
+
+  <aside id="right">
+    <div class="tabs">
+      <button data-tab="props" class="on">Feld</button>
+      <button data-tab="warn">Warnungen</button>
+      <button data-tab="qty">Mengen</button>
+      <button data-tab="pts">Einbauteile</button>
+    </div>
+    <div class="tabbody" id="tab-props"></div>
+    <div class="tabbody" id="tab-warn" hidden></div>
+    <div class="tabbody" id="tab-qty" hidden></div>
+    <div class="tabbody" id="tab-pts" hidden></div>
+  </aside>
+</div>
+</div>
+
+<input type="file" id="fileIn" accept=".json,application/json" hidden>
+
+<dialog id="dlgPrint">
+  <h2>Plan drucken / als PDF speichern</h2>
+  <label class="fld"><span>Titel</span><input type="text" id="prTitle"></label>
+  <div class="g2">
+    <label class="fld"><span>Papier</span><select id="prPaper"><option value="A4L">A4 quer</option><option value="A4P">A4 hoch</option><option value="A3L" selected>A3 quer</option><option value="A3P">A3 hoch</option></select></label>
+    <label class="fld"><span>Massstab</span><select id="prScale"><option value="fit">automatisch</option><option value="100">1:100</option><option value="200">1:200</option><option value="250">1:250</option><option value="500">1:500</option><option value="1000">1:1000</option></select></label>
+  </div>
+  <label class="chk"><input type="checkbox" id="prThick" checked> Linien für den Druck betonen (mind. 0.2 mm)</label>
+  <label class="chk"><input type="checkbox" id="prSafety" checked> Sicherheitszonen einzeichnen</label>
+  <label class="chk"><input type="checkbox" id="prWarn" checked> Warnliste auf dem Plan</label>
+  <label class="chk"><input type="checkbox" id="prLage" checked> Lagemasse der Felder (Massketten am Platzrand)</label>
+  <label class="chk"><input type="checkbox" id="prDetail" checked> Detailblatt pro Feld mit Massen und Eckpunkten zum Einmessen</label>
+  <label class="chk"><input type="checkbox" id="prQty" checked> Mengen und Einbauteile auf der letzten Seite</label>
+  <div class="info" id="prInfo"></div>
+  <p class="small muted">Im Druckdialog «Als PDF speichern» wählen und die Skalierung auf 100 % lassen, damit der Massstab stimmt.</p>
+  <div class="dlgbtns"><button class="btn" id="prCancel">Abbrechen</button><button class="btn primary" id="prGo">Drucken …</button></div>
+</dialog>
+
+<div id="meldung" class="meldung" role="status" aria-live="polite" hidden></div>
+<div id="printArea"></div>
+
+<noscript>Diese Seite braucht JavaScript.</noscript>
+<script type="module" src="js/markierung/planer.js"></script>
+</body>
+</html>

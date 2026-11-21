@@ -1,10 +1,11 @@
 // Datenhaltung in IndexedDB. Alle Daten bleiben auf dem Gerät.
 // Stores: plaetze, maengel (Index platzId), fotos (Bilddaten getrennt, damit Listen schnell bleiben),
 // vorschauen (kleine Bilder für Listen, gleiche id wie das Foto; ab Version 2),
-// offerten und positionen (Index offerteId) für die Offerte-Aufnahme (ab Version 3).
+// offerten und positionen (Index offerteId) für die Offerte-Aufnahme (ab Version 3),
+// markierungsplaene für den Markierungsplaner (ab Version 4).
 
 const DB_NAME = 'maengelapp';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let dbPromise = null;
 
@@ -34,6 +35,9 @@ function oeffnen() {
         if (!db.objectStoreNames.contains('positionen')) {
           const s = db.createObjectStore('positionen', { keyPath: 'id' });
           s.createIndex('offerteId', 'offerteId', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('markierungsplaene')) {
+          db.createObjectStore('markierungsplaene', { keyPath: 'id' });
         }
       };
       anfrage.onsuccess = () => {
@@ -201,8 +205,8 @@ export function schluessel(store) {
 
 // Übernimmt Daten aus einer Sicherung. Bestehendes bleibt; bei gleicher id gewinnt der neuere Stand.
 // Danach werden Fotos gelöscht, die zu keinem Mangel und keiner Position mehr gehören.
-export function importieren({ plaetze = [], maengel = [], fotos = [], offerten = [], positionen = [] }) {
-  const stores = ['plaetze', 'maengel', 'fotos', 'vorschauen', 'offerten', 'positionen'];
+export function importieren({ plaetze = [], maengel = [], fotos = [], offerten = [], positionen = [], markierungsplaene = [] }) {
+  const stores = ['plaetze', 'maengel', 'fotos', 'vorschauen', 'offerten', 'positionen', 'markierungsplaene'];
   return transaktion(stores, 'readwrite', (tx) => {
     const fs = tx.objectStore('fotos');
     const vs = tx.objectStore('vorschauen');
@@ -210,7 +214,8 @@ export function importieren({ plaetze = [], maengel = [], fotos = [], offerten =
     for (const f of fotos) {
       fs.getKey(f.id).onsuccess = (ev) => { if (ev.target.result === undefined) fs.put(f); };
     }
-    const listen = [['plaetze', plaetze], ['maengel', maengel], ['offerten', offerten], ['positionen', positionen]];
+    const listen = [['plaetze', plaetze], ['maengel', maengel], ['offerten', offerten], ['positionen', positionen],
+      ['markierungsplaene', markierungsplaene]];
     let offen = listen.reduce((summe, [, liste]) => summe + liste.length, 0);
     const aufraeumen = () => {
       // Benutzte Fotos sammeln, alle anderen entfernen
@@ -307,5 +312,28 @@ export function positionLoeschen(position) {
   return transaktion(['positionen', 'fotos', 'vorschauen'], 'readwrite', (tx) => {
     for (const id of position.fotoIds || []) { tx.objectStore('fotos').delete(id); tx.objectStore('vorschauen').delete(id); }
     tx.objectStore('positionen').delete(position.id);
+  }).then(aenderungMerken);
+}
+
+// ---------- Markierungspläne ----------
+// Ein Plan = { id, name, daten (ganzer Planerzustand), erstellt, geaendert }. Kein Bezug zu Plätzen oder Offerten.
+
+export function markierungsplanSpeichern(plan) {
+  const jetzt = new Date().toISOString();
+  const p = { ...plan, geaendert: jetzt };
+  if (!p.id) p.id = neueId();
+  return transaktion(['markierungsplaene'], 'readwrite', (tx) => {
+    const st = tx.objectStore('markierungsplaene');
+    st.get(p.id).onsuccess = (ev) => {
+      // Erstellungsdatum vom bestehenden Plan übernehmen
+      p.erstellt = (ev.target.result && ev.target.result.erstellt) || p.erstellt || jetzt;
+      st.put(p);
+    };
+  }).then(() => { aenderungMerken(); return p; });
+}
+
+export function markierungsplanLoeschen(id) {
+  return transaktion(['markierungsplaene'], 'readwrite', (tx) => {
+    tx.objectStore('markierungsplaene').delete(id);
   }).then(aenderungMerken);
 }

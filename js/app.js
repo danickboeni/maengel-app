@@ -961,8 +961,9 @@ async function mangelAnsicht(mangelId) {
 
 async function sicherungAnsicht() {
   const token = aktuelleAnsicht;
-  const [plaetze, maengel, offerten, fotoIds, speicher, kacheln] = await Promise.all([
-    db.alle('plaetze'), db.alle('maengel'), db.alle('offerten'), db.schluessel('fotos'), speicherInfo(), kachelAnzahl().catch(() => 0),
+  const [plaetze, maengel, offerten, plaene, fotoIds, speicher, kacheln] = await Promise.all([
+    db.alle('plaetze'), db.alle('maengel'), db.alle('offerten'), db.schluessel('markierungsplaene'), db.schluessel('fotos'),
+    speicherInfo(), kachelAnzahl().catch(() => 0),
   ]);
   if (!nochAktuell(token)) return;
   kopf('Sicherung', '#/', null);
@@ -974,7 +975,7 @@ async function sicherungAnsicht() {
       <section class="karte-block${faellig ? ' warnung' : ''}">
         <h2>Daten sichern</h2>
         <p class="status-zeile">${letzte ? `Letzte Sicherung: <strong>${datum(letzte)}</strong>` : '<strong>Noch keine Sicherung erstellt.</strong>'}</p>
-        <p class="hinweis">Auf diesem Gerät: ${plaetze.length} Plätze, ${anzahlText(maengel.length)}, ${offerten.length === 1 ? "1 Offerte" : `${offerten.length} Offerten`}, ${fotoIds.length} Fotos.
+        <p class="hinweis">Auf diesem Gerät: ${plaetze.length} Plätze, ${anzahlText(maengel.length)}, ${offerten.length === 1 ? "1 Offerte" : `${offerten.length} Offerten`}, ${plaene.length === 1 ? '1 Markierungsplan' : `${plaene.length} Markierungspläne`}, ${fotoIds.length} Fotos.
           Die Daten liegen nur auf diesem Handy. Sichere sie regelmässig und speichere die Datei an einem sicheren Ort
           (z. B. «In Dateien sichern» → iCloud Drive oder OneDrive, oder per Mail an dich).</p>
         <button type="button" class="knopf haupt" id="sichern">Sicherung erstellen</button>
@@ -1040,6 +1041,7 @@ async function sicherungAnsicht() {
         + `Plätze: ${p.plaetze.total} (neu ${p.plaetze.neu}, aktueller ${p.plaetze.aktueller})\n`
         + `Mängel: ${p.maengel.total} (neu ${p.maengel.neu}, aktueller ${p.maengel.aktueller})\n`
         + `Offerten: ${p.offerten.total} (neu ${p.offerten.neu}, aktueller ${p.offerten.aktueller})\n`
+        + `Markierungspläne: ${p.markierungsplaene.total} (neu ${p.markierungsplaene.neu}, aktueller ${p.markierungsplaene.aktueller})\n`
         + `Fotos: ${p.fotos}\n\n`
         + 'Daten auf diesem Gerät bleiben erhalten.';
       if (!confirm(frage)) { einlesenStatus.textContent = ''; return; }
@@ -1166,11 +1168,13 @@ async function berichtAnsicht(platzId) {
 async function startAnsicht() {
   const token = aktuelleAnsicht;
   kopf('Sportplatz', null, null);
-  const [plaetze, maengel, offerten] = await Promise.all([db.alle('plaetze'), db.alle('maengel'), db.alle('offerten')]);
+  const [plaetze, maengel, offerten, plaene] = await Promise.all([
+    db.alle('plaetze'), db.alle('maengel'), db.alle('offerten'), db.schluessel('markierungsplaene'),
+  ]);
   if (!nochAktuell(token)) return;
 
   // Daten aus früheren Versionen haben noch keine Änderungszeit: jetzt setzen, damit die Erinnerung greift
-  const hatDaten = plaetze.length || maengel.length || offerten.length;
+  const hatDaten = plaetze.length || maengel.length || offerten.length || plaene.length;
   if (hatDaten && einstellungLesen('letzte-aenderung-gesetzt', null) === null) {
     try { if (!localStorage.getItem('letzte-aenderung')) db.aenderungMerken(); } catch (_) { /* egal */ }
     einstellungSchreiben('letzte-aenderung-gesetzt', true);
@@ -1196,6 +1200,11 @@ async function startAnsicht() {
         <svg viewBox="0 0 24 24" width="44" height="44" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 3h6v3H9zM8.5 11h7M8.5 15h7M8.5 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
         <span class="start-titel">Offerte aufnehmen</span>
         <span class="start-unter">${offeneOfferten} ${offeneOfferten === 1 ? 'offene Offerte' : 'offene Offerten'}</span>
+      </a>
+      <a class="start-knopf start-markierung" href="markierung.html">
+        <svg viewBox="0 0 24 24" width="44" height="44" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 5v14" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M2.5 9h3v6h-3M21.5 9h-3v6h3" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        <span class="start-titel">Markierungsplan</span>
+        <span class="start-unter">${plaene.length} ${plaene.length === 1 ? 'Plan' : 'Pläne'} · zeichnen am PC oder Tablet</span>
       </a>
       <a class="knopf start-sicherung${faellig ? ' faellig' : ''}" href="#/sicherung">Sicherung</a>
     </div>`;

@@ -1,8 +1,8 @@
 // Sicherung: alle Daten mit Fotos als eine Datei exportieren und wieder einlesen.
 import * as db from './db.js';
 
-// Format 1: Plätze und Mängel. Format 2: zusätzlich Offerten und Positionen.
-const FORMAT = 2;
+// Format 1: Plätze und Mängel. Format 2: zusätzlich Offerten und Positionen. Format 3: zusätzlich Markierungspläne.
+const FORMAT = 3;
 const TAG = 24 * 60 * 60 * 1000;
 export const ERINNERUNG_TAGE = 7;
 
@@ -48,11 +48,13 @@ export function dateiDatum(d = new Date()) {
 
 // Erstellt die Sicherungsdatei. Die Fotos werden einzeln angehängt, damit nie ein riesiger Text im Speicher liegt.
 export async function sicherungErstellen(fortschritt = () => {}) {
-  const [plaetze, maengel, offerten, positionen, fotoIds] = await Promise.all([
-    db.alle('plaetze'), db.alle('maengel'), db.alle('offerten'), db.alle('positionen'), db.schluessel('fotos'),
+  const [plaetze, maengel, offerten, positionen, markierungsplaene, fotoIds] = await Promise.all([
+    db.alle('plaetze'), db.alle('maengel'), db.alle('offerten'), db.alle('positionen'), db.alle('markierungsplaene'),
+    db.schluessel('fotos'),
   ]);
   const teile = [];
-  const kopf = { app: 'maengelapp', format: FORMAT, erstellt: new Date().toISOString(), plaetze, maengel, offerten, positionen };
+  const kopf = { app: 'maengelapp', format: FORMAT, erstellt: new Date().toISOString(), plaetze, maengel, offerten, positionen,
+    markierungsplaene };
   teile.push(JSON.stringify(kopf).slice(0, -1), ',"fotos":[');
   let i = 0;
   for (const id of fotoIds) {
@@ -69,7 +71,8 @@ export async function sicherungErstellen(fortschritt = () => {}) {
   const name = `maengel-sicherung-${dateiDatum()}.json`;
   return {
     datei: new File([blob], name, { type: 'application/json' }),
-    plaetze: plaetze.length, maengel: maengel.length, offerten: offerten.length, fotos: i,
+    plaetze: plaetze.length, maengel: maengel.length, offerten: offerten.length,
+    markierungsplaene: markierungsplaene.length, fotos: i,
   };
 }
 
@@ -116,7 +119,10 @@ export async function sicherungPruefen(datei) {
   if (daten.format > FORMAT) throw new Error('Diese Sicherung stammt aus einer neueren Version der App. Bitte zuerst die App aktualisieren.');
   daten.offerten = Array.isArray(daten.offerten) ? daten.offerten : [];
   daten.positionen = Array.isArray(daten.positionen) ? daten.positionen : [];
-  const [plaetze, maengel, offerten] = await Promise.all([db.alle('plaetze'), db.alle('maengel'), db.alle('offerten')]);
+  daten.markierungsplaene = Array.isArray(daten.markierungsplaene) ? daten.markierungsplaene : [];
+  const [plaetze, maengel, offerten, markierungsplaene] = await Promise.all([
+    db.alle('plaetze'), db.alle('maengel'), db.alle('offerten'), db.alle('markierungsplaene'),
+  ]);
   const vorhanden = (liste) => new Map(liste.map((x) => [x.id, x]));
   function vergleich(neu, alt) {
     const map = vorhanden(alt);
@@ -134,6 +140,7 @@ export async function sicherungPruefen(datei) {
     plaetze: vergleich(daten.plaetze, plaetze),
     maengel: vergleich(daten.maengel, maengel),
     offerten: vergleich(daten.offerten, offerten),
+    markierungsplaene: vergleich(daten.markierungsplaene, markierungsplaene),
     fotos: (daten.fotos || []).length,
   };
 }
@@ -148,7 +155,8 @@ export async function sicherungEinlesen(daten, fortschritt = () => {}) {
     fortschritt(i + 1, liste.length);
   }
   await db.importieren({
-    plaetze: daten.plaetze, maengel: daten.maengel, offerten: daten.offerten || [], positionen: daten.positionen || [], fotos,
+    plaetze: daten.plaetze, maengel: daten.maengel, offerten: daten.offerten || [], positionen: daten.positionen || [],
+    markierungsplaene: daten.markierungsplaene || [], fotos,
   });
 }
 
