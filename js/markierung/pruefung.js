@@ -5,7 +5,7 @@ import { COLORS, COLOR, BELAG, lowContrast, NORM } from './normen.js';
 // Offener Plan (wird mit setState ersetzt) und Einstellungen der Ansicht
 export let state=null;
 export function setState(s){state=s;geoCache.clear();}
-export const settings={grid:true,safety:true,dims:true,notes:true,gaps:true,thick:true,snap:0.05};
+export const settings={grid:true,safety:true,dims:true,notes:true,gaps:true,thick:true,snap:0.01,sv:2};
 
 let uidN=0;const newId=()=>'f'+Date.now().toString(36)+(uidN++).toString(36)+Math.random().toString(36).slice(2,5);
 function uniqueName(base){const s=new Set(state.fields.map(f=>f.name));if(!s.has(base))return base;let i=2;while(s.has(base+' '+i))i++;return base+' '+i;}

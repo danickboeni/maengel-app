@@ -80,6 +80,7 @@ function shiftG(g,dx,dy){
   g.dims.forEach(d=>{if(d.t==='lin'){d.x1+=dx;d.x2+=dx;d.y1+=dy;d.y2+=dy;}else if(d.t==='rad'){d.cx+=dx;d.cy+=dy;}else{d.x+=dx;d.y+=dy;}});
   if(g.outline){g.outline.x0+=dx;g.outline.x1+=dx;g.outline.y0+=dy;g.outline.y1+=dy;}
   if(g.labelAt){g.labelAt.x+=dx;g.labelAt.y+=dy;}
+  if(g.anchor){g.anchor.x+=dx;g.anchor.y+=dy;}
   return g;
 }
 function arcPts(cx,cy,r,a0,a1){const p=[[cx+r*Math.cos(a0),cy+r*Math.sin(a0)],[cx+r*Math.cos(a1),cy+r*Math.sin(a1)]];for(let k=Math.ceil(a0/(PI/2));k*PI/2<=a1;k++){const a=k*PI/2;p.push([cx+r*Math.cos(a),cy+r*Math.sin(a)]);}return p;}
@@ -396,6 +397,9 @@ const NORM={
       {k:'grubeB',l:'Grube Breite (je Bahn)',u:'m',t:'num',min:1,max:5,step:0.25,def:3},
       {k:'rand',l:'Seitenlinien am Anlauf',t:'bool',def:true},
       {k:'zone',l:'Absprungzone 80 cm',t:'bool',def:true},
+      {k:'snr',l:'Startzahlen am Anlaufbeginn',t:'bool',def:false},
+      {k:'snrZgr',l:'Höhe der Startzahlen',u:'m',t:'num',min:0.2,max:1.2,step:0.01,def:0.5,if:o=>o.snr},
+      {k:'snrAbst',l:'Abstand Anlaufbeginn – Zahl',u:'m',t:'num',min:0,max:10,step:0.01,def:0.3,if:o=>o.snr},
       {k:'met',l:'Anlaufmetrierung (ab Vorderkante Absprungbalken)',t:'bool',def:false},
       {k:'metAb',l:'Metrierung ab',u:'m',t:'num',min:1,max:60,step:1,def:5,int:true,if:o=>o.met},
       {k:'metSeite',l:'Metrierung auf Seite',t:'select',def:2,options:[[2,'beide Seiten'],[0,'links (in Laufrichtung)'],[1,'rechts (in Laufrichtung)']],if:o=>o.met},
@@ -412,10 +416,18 @@ const NORM={
         if(n>1&&achs<W+2*lw-1e-9){for(let j=0;j<=n;j++){const y=W/2+(j-0.5)*achs;Ln(g,xr0,y,bk,y,lw);}}
         else for(let k=0;k<n;k++){Ln(g,xr0,ax(k)-W/2-lw/2,bk,ax(k)-W/2-lw/2,lw);Ln(g,xr0,ax(k)+W/2+lw/2,bk,ax(k)+W/2+lw/2,lw);}
       }
+      // Startzahlen: pro Bahn eine Zahl in der Bahnmitte, lesbar in Laufrichtung (wie bei der Laufbahn).
+      // snrAbst = Abstand vom Anlaufbeginn bis zum Fuss der Zahl.
+      const zs=clamp(+o.snrZgr||0.5,0.2,1.2),sa=Math.max(0,+o.snrAbst||0),vorne=o.snr?sa+zs:0;
+      if(o.snr){
+        for(let k=0;k<n;k++)g.digits.push({x:xr0+sa+zs/2,y:ax(k),t:String(k+1),size:zs,ang:PI/2});
+        if(0.6*zs*String(n).length>W-0.1)g.hints.push('Startzahlen sind breiter als die Bahn.');
+        if(xr0+sa+zs>-0.5)g.hints.push('Startzahlen liegen nicht mehr im Anlauf.');
+      }
       for(let k=0;k<n;k++){const y0=ax(k)-W/2;
         g.objs.push({shape:'rect',x:-0.2,y:y0,w:0.2,h:W,fill:'#f4f4f4',stroke:'#8a8a8a',label:'Absprungbalken'});
         if(o.zone){Ln(g,-0.475,y0,-0.475,y0+W,lw);Ln(g,0.325,y0,0.325,y0+W,lw);}
-        if(n>1)g.notes.push({x:xr0+1.2,y:ax(k),t:'Bahn '+(k+1),size:0.4});}
+        if(n>1)g.notes.push({x:xr0+vorne+1.2,y:ax(k),t:'Bahn '+(k+1),size:0.4});}
       // Anlaufmetrierung: jeder Meter ein kurzer Strich, alle 5 m ein langer Strich mit Zahl,
       // gemessen ab Vorderkante Absprungbalken (x = 0). Striche an der Aussen- oder Innenseite
       // der äusseren Seitenlinien; Zahlen lesbar in Laufrichtung (Kopf zur Grube).
@@ -449,10 +461,13 @@ const NORM={
         DL(g,bk,mid-gw/2,bk+gL,mid-gw/2,0,-0.6);DL(g,bk+gL,mid-gw/2,bk+gL,mid+gw/2,0.8,0);}
       {const topEdge=o.rand?(n>1&&achs<W+2*lw-1e-9?W/2-achs/2-lw:ax(0)-W/2-lw):ax(0)-W/2;
         DL(g,xr0,topEdge,0,topEdge,0,-1.3);DL(g,0,topEdge,bk,topEdge,0,-1.3);
-        DL(g,xr0+0.8,ax(0)-W/2,xr0+0.8,ax(0)+W/2,0,0,'1.22');if(n>1)DL(g,xr0+2.5,ax(0),xr0+2.5,ax(1),0,0);
+        DL(g,xr0+vorne+0.8,ax(0)-W/2,xr0+vorne+0.8,ax(0)+W/2,0,0,'1.22');if(n>1)DL(g,xr0+vorne+2.5,ax(0),xr0+vorne+2.5,ax(1),0,0);
+        if(o.snr&&sa>0)DL(g,xr0,ax(0)+W/2+lw,xr0+sa,ax(0)+W/2+lw,0,0.5);
         if(o.zone)DL(g,-0.5,ax(0)+W/2,0.3,ax(0)+W/2,0,0.5,'0.80');}
       if(bk<1-1e-9)g.warns.push('Abstand Balken – Grube unter 1.00 m (Regelwerk: mindestens 1.00 m).');
       g.hints.push('Anlauflänge und Grube sind noch nicht belegt (Annahme).');
+      // Fester Punkt beim Ändern der Optionen: Vorderkante Grube auf der Achse von Bahn 1
+      g.anchor={x:bk,y:ax(0)};
       const b=bboxOf(g);g.outline={x0:b.x0,y0:b.y0,x1:b.x1,y1:b.y1};g.labelAt={x:xr0/2,y:b.y1+0.8};
       return shiftG(g,-(b.x0+b.x1)/2,-(b.y0+b.y1)/2);
     }},

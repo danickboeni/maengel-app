@@ -72,7 +72,9 @@ function undo(){if(hi>0){hi--;restore(hist[hi]);}}
 function redo(){if(hi<hist.length-1){hi++;restore(hist[hi]);}}
 function afterChange(){renderList();renderTabs();requestRender();$('#bUndo').disabled=hi<=0;$('#bRedo').disabled=hi>=hist.length-1;syncPlatzInputs();}
 function saveSettings(){try{localStorage.setItem(STORE_SET,JSON.stringify(settings));}catch(e){}}
-function loadSettings(){try{const s=JSON.parse(localStorage.getItem(STORE_SET)||'null');if(s)Object.assign(settings,s);}catch(e){}}
+function loadSettings(){try{const s=JSON.parse(localStorage.getItem(STORE_SET)||'null');
+  // Einstellungen von vor sv 2: alter Standard-Fang 5 cm wird zu 1 cm
+  if(s){if(!s.sv&&s.snap===0.05)s.snap=0.01;s.sv=2;Object.assign(settings,s);}}catch(e){}}
 function sanitize(o){
   if(!o||typeof o!=='object'||!o.platz||!Array.isArray(o.fields))throw new Error('Keine gültige Projektdatei.');
   const P={L:clamp(+o.platz.L||40,5,300),B:clamp(+o.platz.B||20,5,300),belag:BELAG[o.platz.belag]?o.platz.belag:'kunststoff_rot'};
@@ -109,7 +111,8 @@ function optInput(d,v){
   if(d.t==='bool')return `<label class="chk full"><input type="checkbox" data-o="${d.k}" ${v?'checked':''}> ${esc(d.l)}</label>`;
   let inp;
   if(d.t==='select')inp=`<select data-o="${d.k}">${d.options.map(([val,lab])=>`<option value="${val}" ${+val===+v?'selected':''}>${esc(lab)}</option>`).join('')}</select>`;
-  else inp=`<input type="number" data-o="${d.k}" value="${esc(v)}" step="${d.step||0.01}"${d.min!=null?` min="${d.min}"`:''}${d.max!=null?` max="${d.max}"`:''}>`;
+  // Masse in Metern immer auf 1 cm genau einstellbar
+  else inp=`<input type="number" data-o="${d.k}" value="${esc(v)}" step="${d.int?(d.step||1):d.u==='m'?0.01:(d.step||0.01)}"${d.min!=null?` min="${d.min}"`:''}${d.max!=null?` max="${d.max}"`:''}>`;
   return `<label class="fld${d.t==='select'?' full':''}"><span>${esc(d.l)}${d.u?` <em>(${d.u})</em>`:''}</span>${inp}</label>`;
 }
 function renderProps(){
@@ -125,9 +128,9 @@ function renderProps(){
   <div class="small muted" style="margin:-4px 0 8px">${esc(N.name)} · Quelle: ${esc(N.quelle)}</div>
   <label class="fld"><span>Normstufe</span><select data-f="stufe">${N.stufen.map(s=>`<option value="${s.id}" ${s.id===f.stufe?'selected':''}>${esc(s.name)}${s.L?` – ${stufeMass(s)}`:''}</option>`).join('')}</select></label>`;
   if(N.sized){const isNorm=Math.abs(f.L-st.L)<0.005&&Math.abs(f.B-st.B)<0.005;
-    h+=`<div class="g2"><label class="fld"><span>Länge <em>(m)</em></span><input type="number" data-f="L" step="0.1" min="1" max="200" value="${num(f.L)}"></label><label class="fld"><span>Breite <em>(m)</em></span><input type="number" data-f="B" step="0.1" min="1" max="200" value="${num(f.B)}"></label></div>
+    h+=`<div class="g2"><label class="fld"><span>Länge <em>(m)</em></span><input type="number" data-f="L" step="0.01" min="1" max="200" value="${num(f.L)}"></label><label class="fld"><span>Breite <em>(m)</em></span><input type="number" data-f="B" step="0.01" min="1" max="200" value="${num(f.B)}"></label></div>
     <div class="small muted" style="margin:-4px 0 8px">${esc(N.lineRef)} · Norm ${num(st.L)} × ${num(st.B)} m ${isNorm?'✓':`· <button class="btn sm" data-a="normsize">Normmass</button>`}</div>`;}
-  h+=`<div class="g3"><label class="fld"><span>X <em>(m)</em></span><input type="number" data-f="x" step="0.05" value="${+f.x.toFixed(3)}"></label><label class="fld"><span>Y <em>(m)</em></span><input type="number" data-f="y" step="0.05" value="${+f.y.toFixed(3)}"></label><label class="fld"><span>Drehung <em>(°)</em></span><input type="number" data-f="rot" step="1" value="${+(+f.rot).toFixed(2)}"></label></div>
+  h+=`<div class="g3"><label class="fld"><span>X <em>(m)</em></span><input type="number" data-f="x" step="0.01" value="${+f.x.toFixed(3)}"></label><label class="fld"><span>Y <em>(m)</em></span><input type="number" data-f="y" step="0.01" value="${+f.y.toFixed(3)}"></label><label class="fld"><span>Drehung <em>(°)</em></span><input type="number" data-f="rot" step="1" value="${+(+f.rot).toFixed(2)}"></label></div>
   <div class="small muted" style="margin:-4px 0 6px">Bezugspunkt: Feldmitte, ab Platzecke oben links</div>
   <div class="btnrow"><button class="btn sm" data-a="rotL">⟲ 90°</button><button class="btn sm" data-a="rotR">⟳ 90°</button><button class="btn sm" data-a="center">Auf Platz zentrieren</button><button class="btn sm" data-a="dup">Duplizieren</button><button class="btn sm danger" data-a="del">Löschen</button></div>
   <div class="g2"><label class="fld"><span>Priorität <em>(1 = Hauptfeld)</em></span><input type="number" data-f="prio" min="1" max="9" step="1" value="${f.prio}"></label><label class="fld"><span>Linienbreite <em>(cm)</em></span><input type="number" data-f="lwcm" min="2" max="20" step="1" value="${num(f.lw*100)}"></label></div>
@@ -181,6 +184,11 @@ function fillAddStufen(){const N=NORM[$('#addSport').value];$('#addStufe').inner
 function updateAddInfo(){const N=NORM[$('#addSport').value],st=N.stufen.find(s=>s.id===$('#addStufe').value)||N.stufen[0];
   $('#addInfo').innerHTML=`Quelle: ${esc(N.quelle)}<br>Linien: ${num(N.lw*100)} cm, ${esc(N.farbeEmpf)}${(st.sz.stirn||st.sz.laengs)?`<br>Sicherheitszone: Stirn ${f2(st.sz.stirn)} m, Längs ${f2(st.sz.laengs)} m`:''}`;}
 function addField(){const P=state.platz,f=makeField($('#addSport').value,$('#addStufe').value,Math.round(P.L/2*10)/10,Math.round(P.B/2*10)/10,0);state.fields.push(f);sel=f.id;setTab('props');commit();renderProps();}
+// Fester Punkt eines Felds (z. B. Weitsprung: Vorderkante Grube). Beim Ändern der Optionen
+// wird das Feld so nachgeschoben, dass dieser Punkt auf dem Platz an Ort und Stelle bleibt.
+function ankerWelt(f){const a=geoLocal(f).anchor;return a?toW(f,a.x,a.y):null;}
+function ankerHalten(f,vorher){if(!vorher)return;const nach=ankerWelt(f);if(!nach)return;
+  f.x=+(f.x+vorher.x-nach.x).toFixed(4);f.y=+(f.y+vorher.y-nach.y).toFixed(4);syncXY(f);}
 function rotateSel(d){const f=getSel();if(!f)return;f.rot=norm360(f.rot+d);commit();renderProps();}
 function duplicateSel(){const f=getSel();if(!f)return;const c=JSON.parse(JSON.stringify(f));c.id=newId();c.name=uniqueName(f.name.replace(/ \d+$/,''));c.x+=2;c.y+=2;state.fields.push(c);sel=c.id;commit();renderProps();}
 function deleteSel(){const f=getSel();if(!f)return;state.fields=state.fields.filter(x=>x!==f);sel=null;commit();renderProps();}
@@ -198,7 +206,7 @@ function bind(){
   $('#projName').addEventListener('change',e=>{if(nurAnsicht())return;state.name=e.target.value||'Projekt';commit();});
   const toggles={sGrid:'grid',sSafety:'safety',sDims:'dims',sNotes:'notes',sGaps:'gaps',sThick:'thick'};
   for(const [id,k] of Object.entries(toggles)){const i=$('#'+id);i.checked=!!settings[k];i.addEventListener('change',()=>{settings[k]=i.checked;saveSettings();if(k==='gaps')afterChange();else requestRender();});}
-  const sn=$('#sSnap');sn.value=String(settings.snap);if(sn.value==='')sn.value='0.05';sn.addEventListener('change',()=>{settings.snap=parseFloat(sn.value)||0;saveSettings();});
+  const sn=$('#sSnap');sn.value=String(settings.snap);if(sn.value==='')sn.value='0.01';sn.addEventListener('change',()=>{settings.snap=parseFloat(sn.value)||0;saveSettings();});
   $('#bUndo').addEventListener('click',undo);$('#bRedo').addEventListener('click',redo);
   $('#bSave').addEventListener('click',()=>download(fname('json'),JSON.stringify({app:'markierungsplaner',version:1,...state},null,2),'application/json'));
   $('#wcount').addEventListener('click',()=>setTab('warn'));
@@ -220,7 +228,7 @@ function bind(){
       requestRender();updateInfo();return;}
     if(t.dataset.o){const d=NORM[f.sport].opts.find(o=>o.k===t.dataset.o);let v;
       if(d.t==='bool')v=t.checked;else{v=parseFloat(t.value);if(!isFinite(v))return;if(d.min!=null)v=Math.max(d.min,v);if(d.max!=null)v=Math.min(d.max,v);if(d.int)v=Math.round(v);}
-      f.opt[d.k]=v;requestRender();updateInfo();if(d.t!=='num'){commit();if(NORM[f.sport].opts.some(o=>o.if))renderProps();}}});
+      const a0=ankerWelt(f);f.opt[d.k]=v;ankerHalten(f,a0);requestRender();updateInfo();if(d.t!=='num'){commit();if(NORM[f.sport].opts.some(o=>o.if))renderProps();}}});
   props.addEventListener('change',e=>{const t=e.target,f=getSel();if(!f)return;
     if(t.dataset.f==='stufe'){const st=NORM[f.sport].stufen.find(s=>s.id===t.value);f.stufe=st.id;if(st.L){f.L=st.L;f.B=st.B;}Object.assign(f.opt,st.opt||{});commit();renderProps();return;}
     if(t.dataset.f==='rot')f.rot=norm360(f.rot);
@@ -289,13 +297,15 @@ function bind(){
     if(mod&&k==='y'){e.preventDefault();redo();return;}
     if(mod&&k==='d'){e.preventDefault();duplicateSel();return;}
     if(mod&&k==='s'){e.preventDefault();$('#bSave').click();return;}
-    if(mod)return;const f=getSel();
+    const f=getSel();
+    // Pfeiltasten: 1 cm, Shift 10 cm, Ctrl 1 m
+    const mv={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
+    if(mv&&f){e.preventDefault();const st=mod?1:e.shiftKey?0.1:0.01;f.x=+(f.x+mv[0]*st).toFixed(4);f.y=+(f.y+mv[1]*st).toFixed(4);commit();syncXY(f);return;}
+    if(mod)return;
     if(e.key==='Delete'||e.key==='Backspace'){if(f){deleteSel();e.preventDefault();}return;}
     if(e.key==='Escape'){select(null);return;}
     if(k==='f'){fitView();return;}
     if(k==='r'&&f){rotateSel(e.shiftKey?-90:90);return;}
-    const mv={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
-    if(mv&&f){e.preventDefault();const st=e.shiftKey?1:0.1;f.x=+(f.x+mv[0]*st).toFixed(4);f.y=+(f.y+mv[1]*st).toFixed(4);commit();syncXY(f);}
   });
   window.addEventListener('keyup',e=>{if(e.key===' '){spaceDown=false;svg.style.cursor='default';}});
 
