@@ -47,8 +47,39 @@ async function kachelBild(url) {
   return createImageBitmap(blob);
 }
 
-// formen: gemessene Flächen/Linien/Punkte der Offerte [{ messung, nr }]
-async function planZeichnen(platz, punkte, B = 1400, H = 1000, formen = []) {
+// Schiebt Nummern auseinander, die sich überlappen würden (einfache Abstossung).
+function entzerren(marken, abstand, B, H, rand) {
+  for (let runde = 0; runde < 60; runde += 1) {
+    let bewegt = false;
+    for (let i = 0; i < marken.length; i += 1) {
+      for (let j = i + 1; j < marken.length; j += 1) {
+        const a = marken[i]; const b = marken[j];
+        let dx = b.x - a.x; let dy = b.y - a.y;
+        let d = Math.hypot(dx, dy);
+        if (d >= abstand) continue;
+        if (d < 0.01) { dx = 1; dy = 0.4; d = Math.hypot(dx, dy); }
+        const schub = (abstand - d) / 2 + 0.5;
+        a.x -= (dx / d) * schub; a.y -= (dy / d) * schub;
+        b.x += (dx / d) * schub; b.y += (dy / d) * schub;
+        bewegt = true;
+      }
+    }
+    for (const m of marken) {
+      m.x = Math.min(B - rand, Math.max(rand, m.x));
+      m.y = Math.min(H - rand, Math.max(rand, m.y));
+    }
+    if (!bewegt) break;
+  }
+}
+
+// Zeichnet einen Luftbild-Plan mit Punkten (Mängel) und Formen (Offerte).
+//   zentrum: { lat, lng } – Mitte, falls nichts anderes da ist
+//   zentrumEinbeziehen: Zentrum auch in den Ausschnitt nehmen (Übersicht ja, Detail nein)
+//   punkte: [{ lat, lng, nr, farbe }], formen: [{ messung, nr }]
+//   B, H: Bildgrösse in Pixel; s: Grösse der Symbole; einzelZoom: Zoom bei nur einem Punkt
+async function planZeichnen({
+  zentrum, zentrumEinbeziehen = true, punkte = [], formen = [], B = 1400, H = 1000, s = 1, einzelZoom = 19, qualitaet = 0.82,
+}) {
   const canvas = document.createElement('canvas');
   canvas.width = B; canvas.height = H;
   const g = canvas.getContext('2d');
@@ -56,13 +87,18 @@ async function planZeichnen(platz, punkte, B = 1400, H = 1000, formen = []) {
   g.fillRect(0, 0, B, H);
 
   const formPunkte = formen.flatMap((f) => f.messung.punkte);
-  const lats = [platz.lat, ...punkte.map((p) => p.lat), ...formPunkte.map((p) => p[0])];
-  const lngs = [platz.lng, ...punkte.map((p) => p.lng), ...formPunkte.map((p) => p[1])];
+  const alle = [
+    ...(zentrumEinbeziehen || (!punkte.length && !formPunkte.length) ? [[zentrum.lat, zentrum.lng]] : []),
+    ...punkte.map((p) => [p.lat, p.lng]),
+    ...formPunkte,
+  ];
+  const lats = alle.map((p) => p[0]);
+  const lngs = alle.map((p) => p[1]);
   const nord = Math.max(...lats); const sued = Math.min(...lats);
   const west = Math.min(...lngs); const ost = Math.max(...lngs);
-  const rand = 110;
-  // Grösste Zoomstufe, bei der alle Punkte Platz haben (bei wenigen Punkten nicht zu nah)
-  let z = punkte.length + formPunkte.length > 1 ? 20 : 19;
+  const rand = 110 * s;
+  // Grösste Zoomstufe, bei der alles Platz hat (bei nur einem Punkt nicht zu nah)
+  let z = alle.length > 1 ? 20 : einzelZoom;
   for (; z > 12; z -= 1) {
     const a = weltPixel(nord, west, z);
     const b = weltPixel(sued, ost, z);
@@ -88,78 +124,142 @@ async function planZeichnen(platz, punkte, B = 1400, H = 1000, formen = []) {
     }
   }));
 
+  const px = (lat, lng) => { const w = weltPixel(lat, lng, z); return [w.x - x0, w.y - y0]; };
+
   // Gemessene Formen der Offerte
-  const px = (p) => { const w = weltPixel(p[0], p[1], z); return [w.x - x0, w.y - y0]; };
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
   for (const { messung } of formen) {
     const farbe = FORM_FARBE[messung.typ] || '#455a64';
-    const xy = messung.punkte.map(px);
-    g.lineJoin = 'round';
+    const xy = messung.punkte.map((p) => px(p[0], p[1]));
     if (messung.typ === 'flaeche' && xy.length >= 3) {
       g.beginPath();
       xy.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
       g.closePath();
       g.globalAlpha = 0.28; g.fillStyle = farbe; g.fill();
-      g.globalAlpha = 1; g.lineWidth = 5; g.strokeStyle = farbe; g.stroke();
+      g.globalAlpha = 1; g.lineWidth = 5 * s; g.strokeStyle = farbe; g.stroke();
     } else if (messung.typ === 'linie' && xy.length >= 2) {
       g.beginPath();
       xy.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
-      g.lineWidth = 9; g.strokeStyle = '#fff'; g.stroke();
-      g.lineWidth = 5; g.strokeStyle = farbe; g.stroke();
+      g.lineWidth = 9 * s; g.strokeStyle = '#fff'; g.stroke();
+      g.lineWidth = 5 * s; g.strokeStyle = farbe; g.stroke();
     } else {
       for (const [x, y] of xy) {
-        g.beginPath(); g.arc(x, y, 11, 0, Math.PI * 2);
-        g.fillStyle = farbe; g.fill(); g.lineWidth = 4; g.strokeStyle = '#fff'; g.stroke();
+        g.beginPath(); g.arc(x, y, 11 * s, 0, Math.PI * 2);
+        g.fillStyle = farbe; g.fill(); g.lineWidth = 4 * s; g.strokeStyle = '#fff'; g.stroke();
       }
     }
   }
-  for (const { messung, nr } of formen) {
-    const [x, y] = px(beschriftungsPunkt(messung));
-    g.beginPath(); g.arc(x, y, 22, 0, Math.PI * 2);
-    g.fillStyle = '#fff'; g.fill();
-    g.lineWidth = 5; g.strokeStyle = FORM_FARBE[messung.typ] || '#455a64'; g.stroke();
-    g.fillStyle = '#1b1f1d';
-    g.font = 'bold 24px Helvetica, Arial, sans-serif';
-    g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText(String(nr), x, y + 1);
-  }
 
-  // Punkte: hohe Nummern zuerst, damit Nr. 1 oben liegt
-  for (const p of [...punkte].reverse()) {
-    const w = weltPixel(p.lat, p.lng, z);
-    const x = w.x - x0; const y = w.y - y0;
+  // Nummern sammeln, überlappende auseinanderschieben
+  const r = 24 * s;
+  const marken = [
+    ...formen.map(({ messung, nr }) => {
+      const [x, y] = px(...beschriftungsPunkt(messung));
+      return { x, y, ox: x, oy: y, nr, art: 'form', farbe: FORM_FARBE[messung.typ] || '#455a64' };
+    }),
+    ...punkte.map((p) => { const [x, y] = px(p.lat, p.lng); return { x, y, ox: x, oy: y, nr: p.nr, art: 'punkt', farbe: p.farbe }; }),
+  ];
+  entzerren(marken, 2 * r + 6 * s, B, H, r + 4);
+
+  // Verschobene Nummern: kleiner Punkt an der echten Stelle und Verbindungslinie
+  for (const m of marken) {
+    if (Math.hypot(m.x - m.ox, m.y - m.oy) < r * 0.5) continue;
+    g.beginPath(); g.moveTo(m.ox, m.oy); g.lineTo(m.x, m.y);
+    g.lineWidth = 5 * s; g.strokeStyle = '#fff'; g.stroke();
+    g.lineWidth = 2.5 * s; g.strokeStyle = '#1b1f1d'; g.stroke();
+    if (m.art === 'punkt') {
+      g.beginPath(); g.arc(m.ox, m.oy, 7 * s, 0, Math.PI * 2);
+      g.fillStyle = m.farbe; g.fill(); g.lineWidth = 3 * s; g.strokeStyle = '#fff'; g.stroke();
+    }
+  }
+  // Hohe Nummern zuerst, damit Nr. 1 oben liegt
+  for (const m of [...marken].sort((a, b) => b.nr - a.nr)) {
     g.beginPath();
-    g.arc(x, y, 24, 0, Math.PI * 2);
-    g.fillStyle = p.farbe;
-    g.fill();
-    g.lineWidth = 5;
-    g.strokeStyle = '#fff';
-    g.stroke();
-    g.fillStyle = p.farbe === DRINGLICHKEIT.tief.farbe ? '#1b1f1d' : '#fff';
-    g.font = `bold ${p.nr > 99 ? 20 : 26}px Helvetica, Arial, sans-serif`;
+    g.arc(m.x, m.y, r, 0, Math.PI * 2);
+    if (m.art === 'form') {
+      g.fillStyle = '#fff'; g.fill();
+      g.lineWidth = 5 * s; g.strokeStyle = m.farbe; g.stroke();
+      g.fillStyle = '#1b1f1d';
+    } else {
+      g.fillStyle = m.farbe; g.fill();
+      g.lineWidth = 5 * s; g.strokeStyle = '#fff'; g.stroke();
+      g.fillStyle = m.farbe === DRINGLICHKEIT.tief.farbe ? '#1b1f1d' : '#fff';
+    }
+    g.font = `bold ${Math.round((m.nr > 99 ? 20 : 26) * s)}px Helvetica, Arial, sans-serif`;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText(String(p.nr), x, y + 1);
+    g.fillText(String(m.nr), m.x, m.y + s);
   }
 
   // Massstab unten links
-  const meterProPixel = (156543.03392 * Math.cos((platz.lat * Math.PI) / 180)) / 2 ** z;
-  const stufen = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000];
-  const meter = stufen.find((m) => m / meterProPixel >= 120) || 1000;
+  const meterProPixel = (156543.03392 * Math.cos((zentrum.lat * Math.PI) / 180)) / 2 ** z;
+  const stufen = [2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000];
+  const meter = stufen.find((m) => m / meterProPixel >= 120 * s) || 1000;
   const laenge = meter / meterProPixel;
   g.fillStyle = 'rgba(255,255,255,0.88)';
-  g.fillRect(20, H - 70, laenge + 40, 50);
+  g.fillRect(20 * s, H - 70 * s, laenge + 40 * s, 50 * s);
   g.fillStyle = '#1b1f1d';
-  g.fillRect(40, H - 36, laenge, 6);
-  g.fillRect(40, H - 46, 4, 16);
-  g.fillRect(40 + laenge - 4, H - 46, 4, 16);
-  g.font = 'bold 22px Helvetica, Arial, sans-serif';
+  g.fillRect(40 * s, H - 36 * s, laenge, 6 * s);
+  g.fillRect(40 * s, H - 46 * s, 4 * s, 16 * s);
+  g.fillRect(40 * s + laenge - 4 * s, H - 46 * s, 4 * s, 16 * s);
+  g.font = `bold ${Math.round(22 * s)}px Helvetica, Arial, sans-serif`;
   g.textAlign = 'left';
   g.textBaseline = 'alphabetic';
-  g.fillText(`${meter} m`, 48, H - 44);
+  g.fillText(`${meter} m`, 48 * s, H - 44 * s);
 
-  const bild = canvas.toDataURL('image/jpeg', 0.85);
+  const bild = canvas.toDataURL('image/jpeg', qualitaet);
   canvas.width = 0; canvas.height = 0;
   return { bild, fehlend, gesamt: aufgaben.length, seitenverhaeltnis: H / B };
+}
+
+// Übersicht in doppelter Auflösung (schärfer beim Hineinzoomen im PDF)
+const UEBERSICHT = { B: 2800, H: 2000, s: 2, qualitaet: 0.72 };
+// Detailausschnitt pro Mangel / Position
+const DETAIL = { B: 1000, H: 750, s: 1.2, einzelZoom: 20 };
+
+// Bilder (Detailplan, Fotos) zu zweit nebeneinander setzen.
+// bilder: [{ daten, verh (Höhe/Breite), titel, alias, rahmen }]
+function bildMasse(bilder, BREITE) {
+  const bB = (BREITE - 6) / 2;
+  const maxH = 75;
+  return bilder.map((b) => {
+    let w = bB; let h = w * b.verh;
+    if (h > maxH) { h = maxH; w = h / b.verh; }
+    return { w, h };
+  });
+}
+
+function ersteReihe(bilder, BREITE) {
+  if (!bilder.length) return 0;
+  const masse = bildMasse(bilder, BREITE).slice(0, 2);
+  return Math.max(...masse.map((m) => m.h)) + (bilder.slice(0, 2).some((b) => b.titel) ? 7 : 4);
+}
+
+function bilderRaster(doc, seite, bilder, L, BREITE) {
+  const bB = (BREITE - 6) / 2;
+  const masse = bildMasse(bilder, BREITE);
+  for (let i = 0; i < bilder.length; i += 2) {
+    const reihe = masse.slice(i, i + 2);
+    const mitTitel = bilder.slice(i, i + 2).some((b) => b.titel);
+    const h = Math.max(...reihe.map((m) => m.h)) + (mitTitel ? 7 : 4);
+    seite.platzFuer(h);
+    reihe.forEach((m, j) => {
+      const b = bilder[i + j];
+      const x = L + j * (bB + 6);
+      doc.addImage(b.daten, 'JPEG', x, seite.y, m.w, m.h, b.alias, 'NONE');
+      if (b.rahmen) { doc.setDrawColor(200, 206, 203); doc.rect(x, seite.y, m.w, m.h); }
+      if (b.titel) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90, 102, 96);
+        doc.text(b.titel, x, seite.y + m.h + 4);
+      }
+    });
+    seite.y += h;
+  }
+}
+
+function fotoBild(f, titel) {
+  return { daten: new Uint8Array(f.daten), verh: (f.hoehe || 3) / (f.breite || 4), titel, alias: `foto-${f.id}` };
 }
 
 // ---------- PDF ----------
@@ -211,7 +311,7 @@ export async function berichtErstellen(platz, { auswahl = 'offen', mitFotos = tr
   const punkte = nummeriert.map(({ m, nr }) => ({
     lat: m.lat, lng: m.lng, nr, farbe: istErledigt(m) ? ERLEDIGT_FARBE : dringlichkeit(m).farbe,
   }));
-  const plan = await planZeichnen(platz, punkte);
+  const plan = await planZeichnen({ zentrum: platz, punkte, ...UEBERSICHT });
   const planH = BREITE * plan.seitenverhaeltnis;
   doc.addImage(plan.bild, 'JPEG', L, y, BREITE, planH, 'plan', 'NONE');
   doc.setDrawColor(200, 206, 203); doc.rect(L, y, BREITE, planH);
@@ -273,8 +373,9 @@ export async function berichtErstellen(platz, { auswahl = 'offen', mitFotos = tr
     }
   }
 
-  // --- Einzelne Mängel mit Fotos ---
-  if (mitFotos && nummeriert.length) {
+  // --- Einzelne Mängel: Detailplan und Fotos ---
+  const seite = { get y() { return y; }, set y(w) { y = w; }, platzFuer };
+  if (nummeriert.length) {
     neueSeite();
     doc.setFont('helvetica', 'bold'); doc.setFontSize(12); schwarz();
     doc.text('Einzelne Mängel', L, y);
@@ -282,62 +383,42 @@ export async function berichtErstellen(platz, { auswahl = 'offen', mitFotos = tr
     let i = 0;
     for (const { m, nr } of nummeriert) {
       i += 1;
-      meldung(`Fotos werden eingefügt (${i}/${nummeriert.length}) …`);
+      meldung(`Detailpläne${mitFotos ? ' und Fotos' : ''} (${i}/${nummeriert.length}) …`);
       const erledigt = istErledigt(m);
-      const [vorher, nachher] = await Promise.all([
-        m.fotoId ? db.holen('fotos', m.fotoId) : null,
-        erledigt && m.fotoNachherId ? db.holen('fotos', m.fotoNachherId) : null,
+      const farbe = punkte[nr - 1].farbe;
+      const [detail, vorher, nachher] = await Promise.all([
+        planZeichnen({ zentrum: m, zentrumEinbeziehen: false, punkte: [{ lat: m.lat, lng: m.lng, nr, farbe }], ...DETAIL }),
+        mitFotos && m.fotoId ? db.holen('fotos', m.fotoId) : null,
+        mitFotos && erledigt && m.fotoNachherId ? db.holen('fotos', m.fotoNachherId) : null,
       ]);
-      const fotos = [[vorher, 'Vorher'], [nachher, 'Nachher']].filter(([f]) => f);
-      // Bildgrössen berechnen
-      // So bemessen, dass meist zwei Mängel auf eine Seite passen
-      const maxB = fotos.length > 1 ? (BREITE - 6) / 2 : 110;
-      const maxH = fotos.length > 1 ? 92 : 95;
-      const masse = fotos.map(([f]) => {
-        const v = (f.hoehe || 3) / (f.breite || 4);
-        let b = maxB; let h = b * v;
-        if (h > maxH) { h = maxH; b = h / v; }
-        return { b, h };
-      });
-      const bildH = masse.length ? Math.max(...masse.map((x) => x.h)) + (fotos.length > 1 ? 6 : 2) : 0;
+      const bilder = [
+        { daten: detail.bild, verh: detail.seitenverhaeltnis, titel: 'Lage', alias: `detail-${m.id}`, rahmen: true },
+        ...(vorher ? [fotoBild(vorher, nachher ? 'Vorher' : 'Foto')] : []),
+        ...(nachher ? [fotoBild(nachher, 'Nachher')] : []),
+      ];
       doc.setFontSize(10);
       const textZeilen = [
         `Dringlichkeit ${dringlichkeit(m).text} · ${erledigt ? `erledigt am ${datum(m.erledigtAm)}` : 'offen'} · erfasst ${datum(m.erstellt, true)}`,
         ...(m.notiz ? doc.splitTextToSize(`Notiz: ${m.notiz}`, BREITE) : []),
         ...(erledigt && m.erledigtNotiz ? doc.splitTextToSize(`Gemacht: ${m.erledigtNotiz}`, BREITE) : []),
       ];
-      platzFuer(10 + textZeilen.length * 4.6 + bildH + 8);
-      doc.setFillColor(punkte[nr - 1].farbe);
+      // Kopf zusammen mit der ersten Bildreihe auf einer Seite halten
+      platzFuer(8 + textZeilen.length * 4.6 + ersteReihe(bilder, BREITE));
+      doc.setFillColor(farbe);
       doc.circle(L + 3.2, y - 1.3, 3.2, 'F');
       doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
-      doc.setTextColor(punkte[nr - 1].farbe === DRINGLICHKEIT.tief.farbe ? '#1b1f1d' : '#ffffff');
+      doc.setTextColor(farbe === DRINGLICHKEIT.tief.farbe ? '#1b1f1d' : '#ffffff');
       doc.text(String(nr), L + 3.2, y - 0.2, { align: 'center' });
       doc.setFontSize(12); schwarz();
       doc.text(m.kategorie, L + 9, y);
       y += 6;
       doc.setFont('helvetica', 'normal'); doc.setFontSize(10); grau();
       doc.text(textZeilen, L, y);
-      y += textZeilen.length * 4.6 + 2;
-      if (fotos.length) {
-        let x = L;
-        fotos.forEach(([f, titel], k) => {
-          const { b, h } = masse[k];
-          doc.addImage(new Uint8Array(f.daten), 'JPEG', x, y, b, h, `foto-${f.id}`, 'NONE');
-          if (fotos.length > 1) {
-            doc.setFontSize(9); grau();
-            doc.text(titel, x, y + h + 4);
-          }
-          x += maxB + 6;
-        });
-        y += bildH;
-      } else {
-        doc.setFontSize(9); grau();
-        doc.text('Kein Foto', L, y + 2);
-        y += 6;
-      }
+      y += textZeilen.length * 4.6;
+      bilderRaster(doc, seite, bilder, L, BREITE);
       doc.setDrawColor(225, 230, 227);
-      doc.line(L, y + 2, R, y + 2);
-      y += 9;
+      doc.line(L, y, R, y);
+      y += 8;
     }
   }
 
@@ -430,7 +511,7 @@ export async function offerteBerichtErstellen(offerte, { mitFotos = true, meldun
   // --- Plan ---
   meldung('Plan wird gezeichnet …');
   const formen = positionen.map((p, i) => ({ messung: p.messung, nr: i + 1 })).filter((f) => f.messung && f.messung.punkte.length);
-  const plan = await planZeichnen(offerte, [], 1400, 1000, formen);
+  const plan = await planZeichnen({ zentrum: offerte, formen, ...UEBERSICHT });
   const planH = BREITE * plan.seitenverhaeltnis;
   if (y + planH > UNTEN - 10) neueSeite();
   doc.addImage(plan.bild, 'JPEG', L, y, BREITE, planH, 'plan', 'NONE');
@@ -484,30 +565,33 @@ export async function offerteBerichtErstellen(offerte, { mitFotos = true, meldun
     });
   }
 
-  // --- Positionen mit Fotos ---
-  const mitBildern = mitFotos ? positionen.map((p, i) => ({ p, nr: i + 1 })).filter(({ p }) => (p.fotoIds || []).length) : [];
-  if (mitBildern.length) {
+  // --- Positionen im Detail: Detailplan und Fotos ---
+  const seite = { get y() { return y; }, set y(w) { y = w; }, platzFuer };
+  if (positionen.length) {
     neueSeite();
     doc.setFont('helvetica', 'bold'); doc.setFontSize(12); schwarz();
-    doc.text('Fotos zu den Positionen', L, y);
+    doc.text('Positionen im Detail', L, y);
     y += 8;
     let zaehler = 0;
-    for (const { p, nr } of mitBildern) {
+    for (const [index, p] of positionen.entries()) {
+      const nr = index + 1;
       zaehler += 1;
-      meldung(`Fotos werden eingefügt (${zaehler}/${mitBildern.length}) …`);
-      const fotos = (await Promise.all(p.fotoIds.map((id) => db.holen('fotos', id)))).filter(Boolean);
-      if (!fotos.length) continue;
-      const bB = (BREITE - 6) / 2;
-      const maxH = 75;
-      const masse = fotos.map((f) => {
-        const v = (f.hoehe || 3) / (f.breite || 4);
-        let b = bB; let h = b * v;
-        if (h > maxH) { h = maxH; b = h / v; }
-        return { b, h };
-      });
-      // Kopf der Position zusammen mit der ersten Bildreihe halten
-      const ersteReihe = Math.max(...masse.slice(0, 2).map((m) => m.h));
-      platzFuer(12 + ersteReihe);
+      meldung(`Detailpläne${mitFotos ? ' und Fotos' : ''} (${zaehler}/${positionen.length}) …`);
+      const hatMessung = p.messung && p.messung.punkte && p.messung.punkte.length;
+      const [detail, fotos] = await Promise.all([
+        hatMessung ? (() => {
+          const [lat, lng] = beschriftungsPunkt(p.messung);
+          return planZeichnen({ zentrum: { lat, lng }, zentrumEinbeziehen: false, formen: [{ messung: p.messung, nr }], ...DETAIL });
+        })() : null,
+        mitFotos ? Promise.all((p.fotoIds || []).map((id) => db.holen('fotos', id))) : [],
+      ]);
+      const bilder = [
+        ...(detail ? [{ daten: detail.bild, verh: detail.seitenverhaeltnis, titel: `Lage – ${MESS_NAME[p.messung.typ]} ${messText(p.messung)}`, alias: `detail-${p.id}`, rahmen: true }] : []),
+        ...fotos.filter(Boolean).map((f, k) => fotoBild(f, `Foto ${k + 1}`)),
+      ];
+      doc.setFontSize(10);
+      const textZeilen = p.beschreibung ? doc.splitTextToSize(p.beschreibung, BREITE) : [];
+      platzFuer(8 + textZeilen.length * 4.6 + ersteReihe(bilder, BREITE));
       const farbe = p.messung ? FORM_FARBE[p.messung.typ] : '#78909c';
       doc.setFillColor(farbe);
       doc.circle(L + 3.2, y - 1.3, 3.2, 'F');
@@ -515,17 +599,14 @@ export async function offerteBerichtErstellen(offerte, { mitFotos = true, meldun
       doc.text(String(nr), L + 3.2, y - 0.2, { align: 'center' });
       doc.setFontSize(12); schwarz();
       doc.text(`${p.art} – ${mengeText(p)}`, L + 9, y);
-      y += 4;
-      for (let i = 0; i < fotos.length; i += 2) {
-        const reihe = masse.slice(i, i + 2);
-        const h = Math.max(...reihe.map((m) => m.h));
-        platzFuer(h + 4);
-        reihe.forEach((m, j) => {
-          const f = fotos[i + j];
-          doc.addImage(new Uint8Array(f.daten), 'JPEG', L + j * (bB + 6), y, m.b, m.h, `foto-${f.id}`, 'NONE');
-        });
-        y += h + 4;
+      y += 6;
+      if (textZeilen.length) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(10); grau();
+        doc.text(textZeilen, L, y);
+        y += textZeilen.length * 4.6;
       }
+      if (bilder.length) bilderRaster(doc, seite, bilder, L, BREITE);
+      else y += 2;
       doc.setDrawColor(225, 230, 227);
       doc.line(L, y, R, y);
       y += 8;

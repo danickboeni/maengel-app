@@ -1099,7 +1099,7 @@ async function berichtAnsicht(platzId) {
           <button type="button" class="segment" data-wert="nein">Ohne Fotos</button>
         </div>
       </fieldset>
-      <p class="hinweis">Der Bericht enthält einen Plan mit nummerierten Punkten, eine Liste und – falls gewählt – jeden Mangel mit Foto.
+      <p class="hinweis">Der Bericht enthält einen Übersichtsplan mit nummerierten Punkten, eine Liste und jeden Mangel mit nahem Detailplan und – falls gewählt – Foto.
         Für das Luftbild im Plan braucht es Empfang oder eine offline gespeicherte Karte.</p>
       <span class="hinweis" id="b-status" aria-live="polite"></span>
       <div id="b-fertig" hidden class="karte-block">
@@ -1828,7 +1828,7 @@ async function offerteBerichtAnsicht(offerteId) {
         </div>
       </fieldset>
       <p class="hinweis">Das PDF «Aufnahme für Offerte» enthält Kunde, einen Plan mit den gemessenen Flächen und Linien,
-        die Positionsliste mit Mengen und – falls gewählt – die Fotos. Preise sind keine enthalten.</p>
+        die Positionsliste mit Mengen und jede Position mit nahem Detailplan und – falls gewählt – Fotos. Preise sind keine enthalten.</p>
       <span class="hinweis" id="b-status" aria-live="polite"></span>
       <div id="b-fertig" hidden class="karte-block">
         <strong id="b-fertig-text"></strong>
