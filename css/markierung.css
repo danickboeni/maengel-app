@@ -106,6 +106,7 @@ dialog h2{margin:0 0 12px;font-size:16px}
 .handle{fill:#fff;stroke:#1f6feb;stroke-width:2px;vector-effect:non-scaling-stroke}
 .dim{stroke:#fff;stroke-width:1px;vector-effect:non-scaling-stroke}
 .dim.bad{stroke:#ff6b6b}
+.fang{stroke:#4fc3ff;stroke-width:1.5px;stroke-dasharray:8 4;vector-effect:non-scaling-stroke;pointer-events:none}
 .otext{stroke:rgba(0,0,0,.75);paint-order:stroke;stroke-linejoin:round;font-family:system-ui,"Segoe UI",Arial,sans-serif;font-weight:600}
 #printArea{display:none}
 

@@ -5,7 +5,7 @@ import { COLORS, COLOR, BELAG, lowContrast, NORM } from './normen.js';
 // Offener Plan (wird mit setState ersetzt) und Einstellungen der Ansicht
 export let state=null;
 export function setState(s){state=s;geoCache.clear();}
-export const settings={grid:true,safety:true,dims:true,notes:true,gaps:true,thick:true,snap:0.01,sv:2};
+export const settings={grid:true,safety:true,dims:true,notes:true,gaps:true,thick:true,snap:0.01,magnet:true,sv:2};
 
 let uidN=0;const newId=()=>'f'+Date.now().toString(36)+(uidN++).toString(36)+Math.random().toString(36).slice(2,5);
 function uniqueName(base){const s=new Set(state.fields.map(f=>f.name));if(!s.has(base))return base;let i=2;while(s.has(base+' '+i))i++;return base+' '+i;}
@@ -102,8 +102,10 @@ function rayAvail(p,n){
   let t=Infinity;if(n.x>1e-9)t=Math.min(t,(L-p.x)/n.x);if(n.x<-1e-9)t=Math.min(t,-p.x/n.x);if(n.y>1e-9)t=Math.min(t,(B-p.y)/n.y);if(n.y<-1e-9)t=Math.min(t,-p.y/n.y);return t;
 }
 function sideName(n){if(Math.abs(n.x)>=Math.abs(n.y))return n.x>0?'rechts':'links';return n.y>0?'unten':'oben';}
+// Kanten, die auf dem Platz liegen müssen (Weitsprung: nur Anlauf, die Grube darf hinaus)
+const platzBox=f=>{const g=geoLocal(f);return g.platzBox||g.outline;};
 function sides(f){
-  const b=geoLocal(f).outline,[c,s]=trig(f);
+  const b=platzBox(f),[c,s]=trig(f);
   const defs=[{id:'s1',stirn:true,pts:[[b.x0,b.y0],[b.x0,b.y1]],n:[-1,0]},{id:'s2',stirn:true,pts:[[b.x1,b.y0],[b.x1,b.y1]],n:[1,0]},{id:'l1',stirn:false,pts:[[b.x0,b.y0],[b.x1,b.y0]],n:[0,-1]},{id:'l2',stirn:false,pts:[[b.x0,b.y1],[b.x1,b.y1]],n:[0,1]}];
   return defs.map(d=>{const nw={x:d.n[0]*c-d.n[1]*s,y:d.n[0]*s+d.n[1]*c},ps=d.pts.map(p=>toW(f,p[0],p[1])),mid={x:(ps[0].x+ps[1].x)/2,y:(ps[0].y+ps[1].y)/2};
     return {...d,nw,mid,avail:Math.min(rayAvail(ps[0],nw),rayAvail(ps[1],nw),rayAvail(mid,nw)),midAvail:rayAvail(mid,nw),name:sideName(nw)};});
@@ -127,7 +129,7 @@ function getWarnings(){
         else if(Math.abs(f.L-st.L)>0.005||Math.abs(f.B-st.B)>0.005)add(`adj:${f.id}`,'hinweis',f,`${f.name}: Masse angepasst auf ${f2(f.L)} × ${f2(f.B)} m (Stufe ${st.name}: ${f2(st.L)} × ${f2(st.B)} m).`);}
     }
     if(f.sport==='fussball'&&st.gruppe==='jun'&&P.belag==='kunstrasen')add(`kr:${f.id}`,'hinweis',f,`${f.name}: Auf Kunststoffrasen empfiehlt der SFV, Juniorenfelder nicht einzuzeichnen, sondern mit Stangen, Hütchen oder Bändern zu markieren (SFV-Richtlinien 2026, Kap. 6).`);
-    const sz=szOf(f),ob=g.outline,cs=[[ob.x0,ob.y0],[ob.x1,ob.y0],[ob.x1,ob.y1],[ob.x0,ob.y1]].map(p=>toW(f,p[0],p[1]));
+    const sz=szOf(f),ob=platzBox(f),cs=[[ob.x0,ob.y0],[ob.x1,ob.y0],[ob.x1,ob.y1],[ob.x0,ob.y1]].map(p=>toW(f,p[0],p[1]));
     const over={links:Math.max(0,-Math.min(...cs.map(p=>p.x))),rechts:Math.max(0,Math.max(...cs.map(p=>p.x))-P.L),oben:Math.max(0,-Math.min(...cs.map(p=>p.y))),unten:Math.max(0,Math.max(...cs.map(p=>p.y))-P.B)};
     const ov=Object.entries(over).filter(([,v])=>v>0.005);
     if(ov.length)add(`out:${f.id}`,'hoch',f,`${f.name}: ragt über den Platzrand (${ov.map(([k,v])=>`${k} ${f2(v)} m`).join(', ')}).`);
@@ -138,7 +140,8 @@ function getWarnings(){
     if(st.hint)add(`sh:${f.id}`,'hinweis',f,`${f.name}: ${st.hint}`);
     if(lowContrast(COLOR[f.color].hex,BELAG[P.belag].hex))add(`kon:${f.id}`,'hinweis',f,`${f.name}: ${COLOR[f.color].name} hat wenig Kontrast zum Belag (${BELAG[P.belag].name}).`);
   }
-  for(const f of fs){geoLocal(f).posts.forEach((p,i)=>{const wp=toW(f,p.x,p.y);
+  // Mobile Einbauteile (Volleyball-Netzpfosten) dürfen in anderen Feldern stehen
+  for(const f of fs){geoLocal(f).posts.forEach((p,i)=>{if(p.mobil)return;const wp=toW(f,p.x,p.y);
     for(const o of fs){if(o===f)continue;const b=geoLocal(o).outline,sz=szOf(o),q=toL(o,wp.x,wp.y);
       const inF=q.x>=b.x0&&q.x<=b.x1&&q.y>=b.y0&&q.y<=b.y1,inS=q.x>=b.x0-sz.stirn&&q.x<=b.x1+sz.stirn&&q.y>=b.y0-sz.laengs&&q.y<=b.y1+sz.laengs;
       if(inF||inS)add(`post:${f.id}:${i}:${o.id}`,'warnung',f,`${f.name}: ${p.label} liegt ${inF?(NORM[o.sport].sized?'im Spielfeld':'im Bereich'):'in der Sicherheitszone'} von ${o.name}.`);}});}

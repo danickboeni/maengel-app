@@ -33,6 +33,9 @@ Mitarbeitende erfassen Mängel und Schadstellen auf Sportplätzen mit Foto und g
 - **Eigenständig:** kein Bezug zu Plätzen, Mängeln oder Offerten.
 - **Plan:** Platzgrösse und Belag festlegen, Felder nach Sportart und Normstufe setzen (Basketball, Volleyball, Handball, Unihockey, Streetball, Fussball inkl. Junioren G–D, Sprintbahn, Weitsprung, Ballwurf, Kugel), dann alles von Hand verschieben, drehen und anpassen.
 - **Normen:** Unter die tiefste Stufe gehen ist erlaubt, gibt aber eine Warnung. Sicherheitszonen nach BASPO bis zum Rand des Belags; Verletzung = Warnung, kein Verbot.
+- **Weitsprung:** Nur der Anlauf muss auf dem Platz liegen; die Grube darf über den Platzrand hinaus (keine Meldung). Beim Ändern von Anlauf, Optionen und Drehung bleibt die Grube stehen.
+- **Volleyball-Netzpfosten** gelten als mobil: keine Warnung, wenn sie in einem anderen Feld oder dessen Sicherheitszone stehen. Feste Einbauteile (Korbmasten) werden weiter geprüft.
+- **Einrasten:** Beim Ziehen rasten Felder kurz am Platzrand, in der Platzmitte und an der Sicherheitszone ein, der Weitsprung zusätzlich mit den Grubenkanten. Schalter «Einrasten», Alt-Taste = ohne.
 - **Priorität pro Feld:** Linien des Hauptfelds laufen durch, untergeordnete Felder werden an Kreuzungen unterbrochen.
 - **Ausgabe:** Browserdruck / PDF mit Gesamtplan, Lagemassen, Detailblatt pro Feld zum Einmessen und Mengen; dazu DXF, SVG und CSV.
 - **Bedienung:** voll am PC und Tablet. Auf dem Handy nur ansehen (Plan, Warnungen, Mengen, Druck).

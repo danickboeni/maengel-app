@@ -81,6 +81,8 @@ function shiftG(g,dx,dy){
   if(g.outline){g.outline.x0+=dx;g.outline.x1+=dx;g.outline.y0+=dy;g.outline.y1+=dy;}
   if(g.labelAt){g.labelAt.x+=dx;g.labelAt.y+=dy;}
   if(g.anchor){g.anchor.x+=dx;g.anchor.y+=dy;}
+  if(g.platzBox){g.platzBox.x0+=dx;g.platzBox.x1+=dx;g.platzBox.y0+=dy;g.platzBox.y1+=dy;}
+  if(g.fang){g.fang.x=g.fang.x.map(v=>v+dx);g.fang.y=g.fang.y.map(v=>v+dy);}
   return g;
 }
 function arcPts(cx,cy,r,a0,a1){const p=[[cx+r*Math.cos(a0),cy+r*Math.sin(a0)],[cx+r*Math.cos(a1),cy+r*Math.sin(a1)]];for(let k=Math.ceil(a0/(PI/2));k*PI/2<=a1;k++){const a=k*PI/2;p.push([cx+r*Math.cos(a),cy+r*Math.sin(a)]);}return p;}
@@ -164,7 +166,8 @@ const NORM={
       rectIn(g,L,B,lw);Ln(g,m,lw,m,B-lw,lw);
       for(const xa of [m-3+lw/2,m+3-lw/2]){Ln(g,xa,lw,xa,B-lw,lw);
         if(o.ext)for(let k=0;k<5;k++){const s=0.2+k*0.35;Ln(g,xa,-s,xa,-s-0.15,lw);Ln(g,xa,B+s,xa,B+s+0.15,lw);}}
-      const p=+o.post;g.posts.push({x:m,y:-p,label:'Netzpfosten'},{x:m,y:B+p,label:'Netzpfosten'});
+      // Netzpfosten sind mobil: keine Warnung, wenn sie in einem anderen Feld stehen
+      const p=+o.post;g.posts.push({x:m,y:-p,label:'Netzpfosten',mobil:true},{x:m,y:B+p,label:'Netzpfosten',mobil:true});
       g.guides.push({shape:'line',x1:m,y1:-p,x2:m,y2:B+p});
       DL(g,0,B,L,B,0,1.4);DL(g,0,0,0,B,-1.4,0);DL(g,m,B,m-3,B,0,0.6);DL(g,m,B,m+3,B,0,0.6);
       g.outline={x0:0,y0:0,x1:L,y1:B};g.labelAt={x:L*0.25,y:B/2};
@@ -449,6 +452,8 @@ const NORM={
             // aber nie über die Seitenlinie hinaus
             if(five)g.digits.push({x:x+lw/2+0.05+zh/2,y:s.y+s.dir*Math.max(lg/2,tw/2+0.02),t,size:zh,ang:PI/2});}}
       }
+      // Auf dem Platz liegen muss nur der Anlauf mit Balken und Absprungzone; die Grube darf über den Platzrand.
+      const rb=bboxOf(g);
       const mid=(ax(0)+ax(n-1))/2;
       if(n>1&&+o.grube===1){
         for(let k=0;k<n;k++)g.objs.push({shape:'rect',x:bk,y:ax(k)-gB/2,w:gL,h:gB,fill:'#dcc795',stroke:'#b39a62',label:'Sprunggrube'});
@@ -468,6 +473,10 @@ const NORM={
       g.hints.push('Anlauflänge und Grube sind noch nicht belegt (Annahme).');
       // Fester Punkt beim Ändern der Optionen: Vorderkante Grube auf der Achse von Bahn 1
       g.anchor={x:bk,y:ax(0)};
+      // Anlauf beginnt genau bei xr0 und endet an der Grube (bboxOf rechnet die Linienenden 2.5 cm zu weit)
+      g.platzBox={x0:xr0,y0:rb.y0,x1:Math.min(rb.x1,Math.max(bk,o.zone?0.325+lw/2:0)),y1:rb.y1};
+      // Einrasten: Grubenkanten (Vorderkante, Hinterkante, Seiten) an Platzrand
+      g.fang={x:[bk,bk+gL],y:[ax(0)-gB/2,ax(n-1)+gB/2]};
       const b=bboxOf(g);g.outline={x0:b.x0,y0:b.y0,x1:b.x1,y1:b.y1};g.labelAt={x:xr0/2,y:b.y1+0.8};
       return shiftG(g,-(b.x0+b.x1)/2,-(b.y0+b.y1)/2);
     }},

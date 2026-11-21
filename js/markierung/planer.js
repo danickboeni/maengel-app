@@ -12,6 +12,7 @@ const $=s=>document.querySelector(s);
 const STORE_SET='markierungsplan.einstellungen';
 const view={s:10,tx:0,ty:0};
 let sel=null,drag=null,spaceDown=false,activeTab='props',ackEdit=null;
+let fangLinien=[];          // Hilfslinien beim Einrasten während des Ziehens
 let planId=null;            // id des offenen Plans in der Datenbank
 const getSel=()=>sel?byId(sel)||null:null;
 // Handy (schmaler Bildschirm): nur ansehen, Warnungen prüfen, PDF – bearbeiten am PC oder Tablet
@@ -49,6 +50,12 @@ function renderOverlay(){
         h+=`<line x1="${n4(e.x-px)}" y1="${n4(e.y-py)}" x2="${n4(e.x+px)}" y2="${n4(e.y+py)}" class="dim${bad?' bad':''}"/>`;
         const mx=(sd.mid.x+e.x)/2+(-sd.nw.y)*10/view.s,my=(sd.mid.y+e.y)/2+sd.nw.x*10/view.s;
         h+=screenText(mx,my,`${f2(t)} m${req>0?` (min. ${f2(req)})`:''}`,11,bad?'#ffb3b3':'#fff');}}
+  }
+  // Hilfslinien beim Einrasten, über den ganzen Platz, Text neben dem gezogenen Feld
+  const ff=drag&&drag.mode==='move'?byId(drag.id):null,ue=12/view.s;
+  for(const l of fangLinien){
+    if(l.ax==='x')h+=`<line x1="${n4(l.v)}" y1="${n4(-ue)}" x2="${n4(l.v)}" y2="${n4(P.B+ue)}" class="fang"/>`+screenText(l.v+6/view.s,ff?ff.y:P.B/2,l.t,11,'#8fd6ff','start');
+    else h+=`<line x1="${n4(-ue)}" y1="${n4(l.v)}" x2="${n4(P.L+ue)}" y2="${n4(l.v)}" class="fang"/>`+screenText(ff?ff.x:P.L/2,l.v-9/view.s,l.t,11,'#8fd6ff');
   }
   overlayG.innerHTML=h;
 }
@@ -189,7 +196,32 @@ function addField(){const P=state.platz,f=makeField($('#addSport').value,$('#add
 function ankerWelt(f){const a=geoLocal(f).anchor;return a?toW(f,a.x,a.y):null;}
 function ankerHalten(f,vorher){if(!vorher)return;const nach=ankerWelt(f);if(!nach)return;
   f.x=+(f.x+vorher.x-nach.x).toFixed(4);f.y=+(f.y+vorher.y-nach.y).toFixed(4);syncXY(f);}
-function rotateSel(d){const f=getSel();if(!f)return;f.rot=norm360(f.rot+d);commit();renderProps();}
+// Einrasten beim Ziehen: Kanten, Mitte und Sicherheitszone des Felds an Platzrand und Platzmitte.
+// Nur bei 0/90/180/270°. Fangbereich 10 Bildschirmpunkte, unabhängig vom Zoom.
+function einrasten(f,nx,ny){
+  const P=state.platz,r=norm360(f.rot)%90;if(r>0.01&&r<89.99)return {x:nx,y:ny,linien:[]};
+  const g=geoLocal(f),b=g.outline,sz=szOf(f),[c,s]=trig(f),tol=10/view.s;
+  // Merkmale lokal: [Achse, Wert, Art, Seite (-1 Anfang, 1 Ende, 0 keine)]
+  const m=[],kanten=(k,art)=>m.push(['x',k.x0,art,-1],['x',k.x1,art,1],['y',k.y0,art,-1],['y',k.y1,art,1]);
+  kanten(g.platzBox||b,'rand');   // Weitsprung: Anlaufkanten; Grubenkanten kommen über g.fang
+  if(g.fang){g.fang.x.forEach(v=>m.push(['x',v,'rand',0]));g.fang.y.forEach(v=>m.push(['y',v,'rand',0]));}
+  m.push(['x',(b.x0+b.x1)/2,'mitte',0],['y',(b.y0+b.y1)/2,'mitte',0]);
+  if(sz.stirn>0)m.push(['x',b.x0-sz.stirn,'sz',-1],['x',b.x1+sz.stirn,'sz',1]);
+  if(sz.laengs>0)m.push(['y',b.y0-sz.laengs,'sz',-1],['y',b.y1+sz.laengs,'sz',1]);
+  const pos={x:nx,y:ny},best={x:null,y:null},sg=v=>v<0?-1:1;
+  for(const [la,v,art,seite] of m){
+    // lokal → Welt (gedreht um 0/90/180/270°): Achse, Abstand zur Feldmitte, Seite
+    let ax,off,sd;
+    if(la==='x'){if(Math.abs(c)>0.5){ax='x';off=v*c;sd=seite*sg(c);}else{ax='y';off=v*s;sd=seite*sg(s);}}
+    else{if(Math.abs(s)>0.5){ax='x';off=-v*s;sd=-seite*sg(s);}else{ax='y';off=v*c;sd=seite*sg(c);}}
+    const max=ax==='x'?P.L:P.B,ziele=art==='mitte'?[[max/2,'mittig']]:art==='sz'?(sd<0?[[0,'Sicherheitszone am Rand']]:[[max,'Sicherheitszone am Rand']]):[[0,'am Rand'],[max,'am Rand']];
+    for(const [z,t] of ziele){const d=z-(pos[ax]+off);if(Math.abs(d)<=tol&&(!best[ax]||Math.abs(d)<Math.abs(best[ax].d)))best[ax]={d,z,t};}
+  }
+  const linien=[];
+  for(const ax of ['x','y'])if(best[ax]){pos[ax]+=best[ax].d;linien.push({ax,v:best[ax].z,t:best[ax].t});}
+  return {x:pos.x,y:pos.y,linien};
+}
+function rotateSel(d){const f=getSel();if(!f)return;const a0=ankerWelt(f);f.rot=norm360(f.rot+d);ankerHalten(f,a0);commit();renderProps();}
 function duplicateSel(){const f=getSel();if(!f)return;const c=JSON.parse(JSON.stringify(f));c.id=newId();c.name=uniqueName(f.name.replace(/ \d+$/,''));c.x+=2;c.y+=2;state.fields.push(c);sel=c.id;commit();renderProps();}
 function deleteSel(){const f=getSel();if(!f)return;state.fields=state.fields.filter(x=>x!==f);sel=null;commit();renderProps();}
 
@@ -204,7 +236,7 @@ function bind(){
     i.addEventListener('change',()=>{commit();});}
   $('#pBelag').addEventListener('change',e=>{state.platz.belag=e.target.value;commit();});
   $('#projName').addEventListener('change',e=>{if(nurAnsicht())return;state.name=e.target.value||'Projekt';commit();});
-  const toggles={sGrid:'grid',sSafety:'safety',sDims:'dims',sNotes:'notes',sGaps:'gaps',sThick:'thick'};
+  const toggles={sGrid:'grid',sSafety:'safety',sDims:'dims',sNotes:'notes',sGaps:'gaps',sThick:'thick',sMagnet:'magnet'};
   for(const [id,k] of Object.entries(toggles)){const i=$('#'+id);i.checked=!!settings[k];i.addEventListener('change',()=>{settings[k]=i.checked;saveSettings();if(k==='gaps')afterChange();else requestRender();});}
   const sn=$('#sSnap');sn.value=String(settings.snap);if(sn.value==='')sn.value='0.01';sn.addEventListener('change',()=>{settings.snap=parseFloat(sn.value)||0;saveSettings();});
   $('#bUndo').addEventListener('click',undo);$('#bRedo').addEventListener('click',redo);
@@ -224,7 +256,8 @@ function bind(){
   props.addEventListener('input',e=>{const t=e.target,f=getSel();if(!f||nurAnsicht())return;
     if(t.dataset.f){const k=t.dataset.f;if(k==='name'){f.name=t.value;renderList();requestRender();return;}if(k==='stufe')return;
       const v=parseFloat(t.value);if(!isFinite(v))return;
-      if(k==='lwcm')f.lw=clamp(v,2,20)/100;else if(k==='prio')f.prio=clamp(Math.round(v),1,9);else if(k==='L'||k==='B')f[k]=clamp(v,1,200);else f[k]=v;
+      if(k==='rot'){const a0=ankerWelt(f);f.rot=v;ankerHalten(f,a0);}
+      else if(k==='lwcm')f.lw=clamp(v,2,20)/100;else if(k==='prio')f.prio=clamp(Math.round(v),1,9);else if(k==='L'||k==='B')f[k]=clamp(v,1,200);else f[k]=v;
       requestRender();updateInfo();return;}
     if(t.dataset.o){const d=NORM[f.sport].opts.find(o=>o.k===t.dataset.o);let v;
       if(d.t==='bool')v=t.checked;else{v=parseFloat(t.value);if(!isFinite(v))return;if(d.min!=null)v=Math.max(d.min,v);if(d.max!=null)v=Math.min(d.max,v);if(d.int)v=Math.round(v);}
@@ -260,7 +293,8 @@ function bind(){
     if(e.button===1||e.button===2||spaceDown){drag=pan;return;}
     if(e.button!==0)return;
     const f=getSel();
-    if(f&&!f.hidden&&!nurAnsicht()){const hp=handlePos(f);if(Math.hypot(w.x-hp.x,w.y-hp.y)<=10/view.s){drag={mode:'rotate',id:f.id,moved:false};return;}}
+    if(f&&!f.hidden&&!nurAnsicht()){const hp=handlePos(f);if(Math.hypot(w.x-hp.x,w.y-hp.y)<=10/view.s){const pv=ankerWelt(f);
+      drag={mode:'rotate',id:f.id,moved:false,pivot:pv,r0:f.rot,a0:pv?deg(Math.atan2(w.y-pv.y,w.x-pv.x)):0};return;}}
     const c=hitCands(w);
     if(c.length){const prev=sel,t=c.find(x=>x.id===sel)||c[0];if(t.id!==sel)select(t.id);
       // Auf dem Handy wird nicht verschoben: Ziehen bewegt die Ansicht, Antippen wählt aus
@@ -275,10 +309,15 @@ function bind(){
     const dxs=e.clientX-(drag.sx??e.clientX),dys=e.clientY-(drag.sy??e.clientY);
     if(!drag.moved&&Math.hypot(dxs,dys)>3)drag.moved=true;
     if(drag.mode==='pan'){if(drag.moved){view.tx=drag.tx+dxs;view.ty=drag.ty+dys;requestRender();}}
-    else if(drag.mode==='move'){if(drag.moved){const f=byId(drag.id);let nx=drag.ox+(w.x-drag.wx),ny=drag.oy+(w.y-drag.wy);const sn=settings.snap;if(sn>0){nx=Math.round(nx/sn)*sn;ny=Math.round(ny/sn)*sn;}f.x=+nx.toFixed(4);f.y=+ny.toFixed(4);syncXY(f);requestRender();}}
-    else if(drag.mode==='rotate'){const f=byId(drag.id);let a=deg(Math.atan2(w.y-f.y,w.x-f.x))+90;a=e.shiftKey?Math.round(a):Math.round(a/15)*15;f.rot=norm360(a);drag.moved=true;syncXY(f);requestRender();}
+    else if(drag.mode==='move'){if(drag.moved){const f=byId(drag.id);let nx=drag.ox+(w.x-drag.wx),ny=drag.oy+(w.y-drag.wy);const sn=settings.snap;if(sn>0){nx=Math.round(nx/sn)*sn;ny=Math.round(ny/sn)*sn;}
+      fangLinien=[];if(settings.magnet&&!e.altKey){const r=einrasten(f,nx,ny);nx=r.x;ny=r.y;fangLinien=r.linien;}
+      f.x=+nx.toFixed(4);f.y=+ny.toFixed(4);syncXY(f);requestRender();}}
+    else if(drag.mode==='rotate'){const f=byId(drag.id);let a;
+      // Felder mit festem Punkt (Weitsprung: Grube) drehen um diesen Punkt, die anderen um die Feldmitte
+      if(drag.pivot)a=drag.r0+deg(Math.atan2(w.y-drag.pivot.y,w.x-drag.pivot.x))-drag.a0;else a=deg(Math.atan2(w.y-f.y,w.x-f.x))+90;
+      a=e.shiftKey?Math.round(a):Math.round(a/15)*15;const p0=ankerWelt(f);f.rot=norm360(a);ankerHalten(f,p0);drag.moved=true;syncXY(f);requestRender();}
   });
-  function endP(e){pointers.delete(e.pointerId);if(pointers.size<2)pinch=null;if(!drag)return;const d=drag;drag=null;
+  function endP(e){pointers.delete(e.pointerId);if(pointers.size<2)pinch=null;if(fangLinien.length){fangLinien=[];requestRender();}if(!drag)return;const d=drag;drag=null;
     if((d.mode==='move'||d.mode==='rotate')&&d.moved){commit();updateInfo();}
     else if(d.cands&&!d.moved&&d.prev===d.id&&d.cands.length>1){const i=d.cands.findIndex(c=>c.id===d.id);select(d.cands[(i+1)%d.cands.length].id);}}
   svg.addEventListener('pointerup',endP);svg.addEventListener('pointercancel',endP);
