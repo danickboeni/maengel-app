@@ -156,6 +156,11 @@ function getWarnings(){
   const courts=fs.filter(f=>NORM[f.sport].sized);
   for(let i=0;i<courts.length;i++)for(let j=i+1;j<courts.length;j++){const a=courts[i],b=courts[j];if(a.color!==b.color||a.sport===b.sport)continue;
     const A=box(a),Bx=box(b);if(A.x0<Bx.x1&&Bx.x0<A.x1&&A.y0<Bx.y1&&Bx.y0<A.y1){const [p,q]=a.prio<=b.prio?[a,b]:[b,a];add(`col:${p.id}:${q.id}`,'hinweis',q,`${p.name} und ${q.name} überlagern sich und haben dieselbe Linienfarbe (${COLOR[a.color].name}).`);}}
+  // SFV-Richtlinien Kap. 6: auf Kunststoffrasen bis zur 1. Liga höchstens 3 zusätzliche Markierungen,
+  // in der Super League keine (Challenge League teilt die Normstufe mit tieferen Ligen: 3er-Regel)
+  if(P.belag==='kunstrasen')for(const f of fs){if(f.sport!=='fussball'||stufeOf(f).gruppe!=='erw')continue;
+    const A=box(f),n=fs.filter(o=>{if(o===f)return false;const Bx=box(o);return A.x0<Bx.x1&&Bx.x0<A.x1&&A.y0<Bx.y1&&Bx.y0<A.y1;}).length,max=stufeOf(f).id==='SL'?0:3;
+    if(n>max)add(`krmark:${f.id}`,'warnung',f,`${f.name}: ${n} weitere ${n>1?'Markierungen liegen':'Markierung liegt'} auf dem Kunststoffrasen – erlaubt ${max?'sind bis zur 1. Liga höchstens 3':'sind in der Super League keine'} (SFV-Richtlinien Kap. 6).`);}
   W.sort((a,b)=>LV[a.level]-LV[b.level]||a.prio-b.prio||a.text.localeCompare(b.text,'de'));
   warnCache={key,val:W};return W;
 }

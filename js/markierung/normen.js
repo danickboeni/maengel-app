@@ -312,6 +312,7 @@ const NORM={
       {id:'SL',gruppe:'erw',mk:'erw',opt:{tz:1},name:'Super League',L:105,B:68,sz:{stirn:3,laengs:3}},
       {id:'CL',gruppe:'erw',mk:'erw',opt:{tz:1},name:'Challenge League bis 2. Liga, Frauen NLB / 1. Liga, Nachwuchsförderung',L:100,B:64,sz:{stirn:3,laengs:3},lm:696},
       {id:'R',gruppe:'erw',mk:'erw',opt:{tz:1},name:'3.–5. Liga, Frauen 2.–4. Liga, Senioren 30+/40+, Junioren A–C (neue Felder)',L:90,B:57.6,sz:{stirn:3,laengs:3}},
+      {id:'R23',gruppe:'erw',mk:'erw',opt:{tz:1},name:'2.–3. Liga, Frauen 1. Liga (bestehende Felder)',L:90,B:57.6,sz:{stirn:3,laengs:3}},
       {id:'RB',gruppe:'erw',mk:'erw',opt:{tz:1},name:'4.–5. Liga, Frauen 2.–4. Liga, Senioren 30+/40+, Junioren A–C (bestehende Felder)',L:90,B:45,sz:{stirn:3,laengs:3}},
       {id:'D9',gruppe:'jun',opt:{tz:0},mk:'D9',name:'Junioren D / FF-14, 9 gegen 9',L:68,B:52,Lmin:57,Lmax:68,Bmin:41,Bmax:52,sz:{stirn:3,laengs:3},hint:'Juniorenfeld: Sicherheitszone nicht angegeben, 3.00 m angenommen (SFV-Minimum Verbandsspiele). Strafraumbreite nicht angegeben, Standard ganze Feldbreite.'},
       {id:'D7',gruppe:'jun',opt:{tz:0},mk:'D7',name:'Junioren D / FF-14, 7 gegen 7',L:55,B:35,Lmin:41,Lmax:55,Bmin:25,Bmax:35,sz:{stirn:3,laengs:3},hint:'Juniorenfeld: Sicherheitszone nicht angegeben, 3.00 m angenommen (SFV-Minimum Verbandsspiele). Strafraumbreite nicht angegeben, Standard ganze Feldbreite.'},
@@ -330,6 +331,11 @@ const NORM={
       {k:'tz',l:'Technische Zonen (Coachingzonen) mit Spielerbänken',t:'select',def:0,options:[[0,'keine'],[1,'an der Seitenlinie oben (ungedreht)'],[2,'an der Seitenlinie unten (ungedreht)']]},
       {k:'bank',l:'Länge Spielerbank',u:'m',t:'num',min:2,max:20,step:0.5,def:6,if:o=>+o.tz>0},
       {k:'tzT',l:'Technische Zone bis (ab Seitenlinie)',u:'m',t:'num',min:2,max:8,step:0.25,def:4,if:o=>+o.tz>0},
+      // SFV-Richtlinien (Zeichnung Spielfeld 11er): Distanzmarken 9.15 m nach dem Eckviertelkreis, ausserhalb des Felds.
+      // Länge 0.50 m aus der Skizze abgelesen. Nur neue Felder; bestehende Pläne bleiben unverändert.
+      {k:'distanz',l:'Distanzmarken 9.15 m ab Eckviertelkreis (0.50 m, ausserhalb)',t:'bool',def:false,neu:true,if:(o,f)=>(NORM.fussball.stufen.find(s=>s.id===f.stufe)||{}).mk==='erw'},
+      // Tore und Eckstangen stehen in Bodenhülsen (SFV-Richtlinien Kap. 13 und 14); als mobil, damit überlagerte Felder nicht warnen
+      {k:'huelsen',l:'Bodenhülsen für Torpfosten und Eckstangen (Einbauteile)',t:'bool',def:false,neu:true,if:(o,f)=>(NORM.fussball.stufen.find(s=>s.id===f.stufe)||{}).mk==='erw'},
     ],
     build(f){
       const g=G(),L=f.L,B=f.B,lw=f.lw,cy=B/2,o=f.opt,mk=(NORM.fussball.stufen.find(s=>s.id===f.stufe)||{}).mk||'erw';
@@ -382,6 +388,10 @@ const NORM={
       const rp=9.15-lw/2;if(rp>pa-11){const phi=Math.acos((pa-11)/rp);Ar(e,11,cy,rp,-phi,phi,lw);}
       const rc=1-lw/2;Ar(e,0,0,rc,0,PI/2,lw);Ar(e,0,B,rc,-PI/2,0,lw);
       e.guides.push({shape:'rect',x:-2,y:cy-3.66,w:2,h:7.32});
+      if(o.distanz){const d=10.15;Ln(e,0,d,-0.50,d,lw);Ln(e,0,B-d,-0.50,B-d,lw);Ln(e,d,0,d,-0.50,lw);Ln(e,d,B,d,B+0.50,lw);}
+      // Torpfosten 12 cm: Vorderkante bündig mit Innenkante der Torlinie, lichte Weite 7.32 m
+      if(o.huelsen)e.posts.push({x:lw-0.06,y:cy-3.72,label:'Torpfosten (Bodenhülse)',mobil:true},{x:lw-0.06,y:cy+3.72,label:'Torpfosten (Bodenhülse)',mobil:true},
+        {x:0,y:0,label:'Eckstange (Bodenhülse)',mobil:true},{x:0,y:B,label:'Eckstange (Bodenhülse)',mobil:true});
       merge(g,e);merge(g,mirrorX(e,L));
       DL(g,0,B,L,B,0,2.0);DL(g,0,0,0,B,-2.0,0);DL(g,0,cy-3.66,0,cy+3.66,-1.0,0);
       DL(g,0,cy+ph,pa,cy+ph,0,1.0);DL(g,pa,cy-ph,pa,cy+ph,1.4,0);DL(g,0,cy+gh,ga,cy+gh,0,0.8);DL(g,ga,cy-gh,ga,cy+gh,0.9,0);
