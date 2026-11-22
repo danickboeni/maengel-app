@@ -227,7 +227,7 @@ function deleteSel(){const f=getSel();if(!f)return;state.fields=state.fields.fil
 
 /* ================= Ereignisse ================= */
 function bind(){
-  $('#addSport').innerHTML=['Ballspiele','Leichtathletik'].map(g=>`<optgroup label="${g}">${Object.entries(NORM).filter(([,N])=>N.gruppe===g).map(([k,N])=>`<option value="${k}">${N.name}</option>`).join('')}</optgroup>`).join('');
+  $('#addSport').innerHTML=['Ballspiele','Leichtathletik'].map(g=>`<optgroup label="${g}">${Object.entries(NORM).filter(([,N])=>N.gruppe===g).sort((a,b)=>a[1].name.localeCompare(b[1].name,'de')).map(([k,N])=>`<option value="${k}">${N.name}</option>`).join('')}</optgroup>`).join('');
   $('#pBelag').innerHTML=BELAEGE.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
   $('#addSport').addEventListener('change',fillAddStufen);$('#addStufe').addEventListener('change',updateAddInfo);fillAddStufen();
   $('#bAdd').addEventListener('click',addField);

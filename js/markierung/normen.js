@@ -96,6 +96,23 @@ function bboxOf(g){
   if(!isFinite(b.x0))return {x0:-0.5,y0:-0.5,x1:0.5,y1:0.5};
   return b;
 }
+// Bande mit gerundeten Ecken als Hilfslinie (wird nicht markiert)
+function bandeG(g,L,B,r){
+  g.guides.push({shape:'line',x1:r,y1:0,x2:L-r,y2:0},{shape:'line',x1:r,y1:B,x2:L-r,y2:B},{shape:'line',x1:0,y1:r,x2:0,y2:B-r},{shape:'line',x1:L,y1:r,x2:L,y2:B-r},
+    {shape:'arc',cx:r,cy:r,r,a0:PI,a1:1.5*PI},{shape:'arc',cx:L-r,cy:r,r,a0:1.5*PI,a1:TAU},{shape:'arc',cx:L-r,cy:B-r,r,a0:0,a1:PI/2},{shape:'arc',cx:r,cy:B-r,r,a0:PI/2,a1:PI});
+}
+// Bullykreis Inline Hockey (BASPO 801): Kreis R 3.00 (Aussenkante), Bullypunkt R 0.30,
+// zwei T-Marken (Balken 1.00 m, Innenkanten 1.70 m auseinander, Steg 1.00 m) und vier Haken 0.60 m aussen am Kreis
+function bullyKreis(g,x,y,lw){
+  const R=3.00,d=0.85+lw/2;
+  Ar(g,x,y,R-lw/2,0,TAU,lw);
+  Ar(g,x,y,0.30-lw/2,0,TAU,lw);Ln(g,x,y-0.30+lw,x,y+0.30-lw,lw);
+  const yo=Math.sqrt(R*R-d*d);
+  for(const s of [-1,1]){
+    Ln(g,x+s*d,y-0.50,x+s*d,y+0.50,lw);Ln(g,x+s*(0.85+lw),y,x+s*1.85,y,lw);
+    for(const t of [-1,1])Ln(g,x+s*d,y+t*yo,x+s*d,y+t*(yo+0.60),lw);
+  }
+}
 function clipTop(r,cyc,lw){let phi=-Math.acos(clamp(lw/r,-1,1));const s=(lw-cyc)/r;if(s>-1)phi=Math.max(phi,Math.asin(clamp(s,-1,1)));return phi;}
 
 /* ================= Normen (BASPO 801, Swiss Athletics 2022, SO Deutschland 2016) ================= */
@@ -321,6 +338,158 @@ const NORM={
       DL(g,0,cy,11,cy,0,-0.7);DR(g,L/2,cy,9.15,-PI/4,'R 9.15');
       techZone();
       g.outline={x0:0,y0:0,x1:L,y1:B};g.labelAt={x:L/2,y:cy-13};
+      return shiftG(g,-L/2,-cy);
+    }},
+  tennis:{name:'Tennis',gruppe:'Ballspiele',quelle:'BASPO 801',farbeEmpf:'weiss (Grundlinie bis 10 cm, übrige Linien bis 5 cm)',defColor:'weiss',lw:0.05,sized:true,lineRef:'Aussenmass (Linien innerhalb)',
+    stufen:[
+      {id:'normal',name:'Normaltennisplatz',L:23.77,B:10.97,sz:{stirn:6.40,laengs:3.66},lm:146.50},
+      {id:'meister',name:'Meisterschaftsplatz',L:23.77,B:10.97,sz:{stirn:8.115,laengs:4.515},lm:146.50},
+    ],
+    opts:[{k:'post',l:'Netzpfosten ausserhalb Doppel-Seitenlinie',u:'m',t:'num',min:0.5,max:1.5,step:0.01,def:0.914}],
+    build(f){
+      const g=G(),L=f.L,B=f.B,lw=f.lw,m=L/2,cy=B/2,al=1.37,sv=6.40;
+      rectIn(g,L,B,lw);
+      const ya=al+lw/2,yb=B-al-lw/2;                                     // Einzel-Seitenlinien (Einzelfeld 8.23 m Aussenmass)
+      Ln(g,lw,ya,L-lw,ya,lw);Ln(g,lw,yb,L-lw,yb,lw);
+      for(const s of [-1,1]){const xs=m+s*(sv-lw/2);Ln(g,xs,ya+lw/2,xs,yb-lw/2,lw);}   // Aufschlaglinien 6.40 m ab Netz
+      Ln(g,m-sv+lw,cy,m+sv-lw,cy,lw);                                    // Aufschlag-Mittellinie
+      Ln(g,lw,cy,lw+0.10,cy,lw);Ln(g,L-lw-0.10,cy,L-lw,cy,lw);           // Mittelzeichen 10 cm an den Grundlinien
+      const p=+f.opt.post;g.posts.push({x:m,y:-p,label:'Netzpfosten'},{x:m,y:B+p,label:'Netzpfosten'});
+      g.guides.push({shape:'line',x1:m,y1:-p,x2:m,y2:B+p});
+      DL(g,0,B,L,B,0,1.4);DL(g,0,0,0,B,-1.4,0);DL(g,0,0,0,al,-0.6,0);DL(g,m,B,m+sv,B,0,0.7);DL(g,m+sv,B,L,B,0,0.7);
+      g.outline={x0:0,y0:0,x1:L,y1:B};g.labelAt={x:L*0.2,y:cy};
+      return shiftG(g,-m,-cy);
+    }},
+  badminton:{name:'Badminton',gruppe:'Ballspiele',quelle:'BASPO 801',farbeEmpf:'weiss oder gelb',defColor:'weiss',lw:0.04,sized:true,lineRef:'Aussenmass (Linien innerhalb)',
+    stufen:[
+      {id:'schule',name:'Schulsport / Übungsbetrieb',L:13.40,B:6.10,sz:{stirn:1.00,laengs:0.30},lm:99.64},
+      {id:'regional',name:'Wettkampf / regional',L:13.40,B:6.10,sz:{stirn:1.50,laengs:0.50},lm:99.64},
+      {id:'national',name:'National',L:13.40,B:6.10,sz:{stirn:2.00,laengs:1.50},lm:99.64},
+      {id:'int',name:'International',L:13.40,B:6.10,sz:{stirn:2.00,laengs:2.00},lm:99.64},
+    ],
+    opts:[],
+    build(f){
+      const g=G(),L=f.L,B=f.B,lw=f.lw,m=L/2,cy=B/2;
+      rectIn(g,L,B,lw);
+      const ya=0.46+lw/2,yb=B-0.46-lw/2;                                 // Einzel-Seitenlinien (Einzelfeld 5.18 m Aussenmass)
+      Ln(g,lw,ya,L-lw,ya,lw);Ln(g,lw,yb,L-lw,yb,lw);
+      const e=G(),xd=0.76-lw/2,xs=m-1.98-lw/2;
+      Ln(e,xd,lw,xd,B-lw,lw);                                            // hintere Aufschlaglinie Doppel 0.76 m ab Grundlinie
+      Ln(e,xs,lw,xs,B-lw,lw);                                            // vordere Aufschlaglinie 1.98 m ab Netz
+      Ln(e,lw,cy,xs-lw/2,cy,lw);                                         // Mittellinie
+      merge(g,e);merge(g,mirrorX(e,L));
+      // Netzpfosten stehen auf den Doppel-Seitenlinien und sind mobil
+      g.posts.push({x:m,y:lw/2,label:'Netzpfosten',mobil:true},{x:m,y:B-lw/2,label:'Netzpfosten',mobil:true});
+      g.guides.push({shape:'line',x1:m,y1:0,x2:m,y2:B});
+      DL(g,0,B,L,B,0,1.0);DL(g,0,0,0,B,-1.0,0);DL(g,0,0,0.76,0,0,-0.5);DL(g,m-1.98,0,m,0,0,-0.5);DL(g,L,0,L,0.46,0.5,0);
+      g.outline={x0:0,y0:0,x1:L,y1:B};g.labelAt={x:L*0.25,y:cy+1.2};
+      return shiftG(g,-m,-cy);
+    }},
+  faustball:{name:'Faustball',gruppe:'Ballspiele',quelle:'BASPO 801',farbeEmpf:'weiss (Linien 5–12 cm)',defColor:'weiss',lw:0.05,sized:true,lineRef:'Aussenmass (Linien innerhalb)',
+    stufen:[{id:'std',name:'Spielfeld',L:50,B:20,sz:{stirn:8,laengs:6}}],
+    opts:[],
+    build(f){
+      const g=G(),L=f.L,B=f.B,lw=f.lw,m=L/2,cy=B/2;
+      rectIn(g,L,B,lw);Ln(g,m,lw,m,B-lw,lw);                             // Mittellinie unter der Leine
+      for(const s of [-1,1]){const x=m+s*(3+lw/2);Ln(g,x,lw,x,B-lw,lw);} // Angabelinien 3.00 m ab Mitte (Linie ausserhalb)
+      g.posts.push({x:m,y:0,label:'Pfosten (Leine)',mobil:true},{x:m,y:B,label:'Pfosten (Leine)',mobil:true});
+      DL(g,0,B,L,B,0,1.4);DL(g,0,0,0,B,-1.4,0);DL(g,m,B,m+3,B,0,0.7);DL(g,m-3,B,m,B,0,0.7);
+      g.outline={x0:0,y0:0,x1:L,y1:B};g.labelAt={x:L*0.25,y:cy};
+      return shiftG(g,-m,-cy);
+    }},
+  korbball:{name:'Korbball',gruppe:'Ballspiele',quelle:'BASPO 801',farbeEmpf:'frei',defColor:'gelb',lw:0.05,sized:true,lineRef:'Aussenmass (Linien innerhalb)',
+    stufen:[
+      {id:'m',name:'Männer',L:40,B:25,Lmin:36,Lmax:40,Bmin:23,Bmax:25,sz:{stirn:1,laengs:1},lm:155,hint:'Lage des Korbs (ø 45 cm an der Endlinie) und der Marken an den Seitenlinien aus der BASPO-Skizze abgelesen.'},
+      {id:'jf',name:'Jugend / Frauen',L:30,B:20,Lmin:28,Lmax:30,Bmin:18,Bmax:20,sz:{stirn:1,laengs:1},hint:'Lage des Korbs (ø 45 cm an der Endlinie) und der Marken an den Seitenlinien aus der BASPO-Skizze abgelesen.'},
+    ],
+    opts:[{k:'wechsel',l:'Marken aussen an den Seitenlinien (Mitte und ±3.00 m, 1.00 m lang)',t:'bool',def:true}],
+    build(f){
+      const g=G(),L=f.L,B=f.B,lw=f.lw,m=L/2,cy=B/2;
+      rectIn(g,L,B,lw);
+      Ln(g,m,cy-0.50,m,cy+0.50,lw);                                      // Mittelmarke 1.00 m
+      if(f.opt.wechsel)for(const x of [m-3-lw/2,m,m+3+lw/2]){Ln(g,x,0,x,-1,lw);Ln(g,x,B,x,B+1,lw);}
+      // Korbraum 3.00 × 3.00 m (Aussenkanten, Tiefe ab Aussenkante Endlinie), Linien innerhalb
+      const e=G(),k=3.00,hb=1.50;
+      Ln(e,lw,cy-hb+lw/2,k-lw,cy-hb+lw/2,lw);Ln(e,lw,cy+hb-lw/2,k-lw,cy+hb-lw/2,lw);Ln(e,k-lw/2,cy-hb,k-lw/2,cy+hb,lw);
+      e.guides.push({shape:'circle',cx:lw+0.225,cy,r:0.225});
+      e.posts.push({x:lw+0.225,y:cy,label:'Korbständer'});
+      merge(g,e);merge(g,mirrorX(e,L));
+      DL(g,0,B,L,B,0,1.6);DL(g,0,0,0,B,-1.4,0);DL(g,0,cy+hb,k,cy+hb,0,0.6);DL(g,k,cy-hb,k,cy+hb,0.6,0);DL(g,m,-1,m+3,-1,0,-0.5);
+      g.outline={x0:0,y0:0,x1:L,y1:B};g.labelAt={x:L*0.3,y:cy};
+      return shiftG(g,-m,-cy);
+    }},
+  inlinehockey:{name:'Inline Hockey',gruppe:'Ballspiele',quelle:'BASPO 801',farbeEmpf:'weiss',defColor:'weiss',lw:0.05,sized:true,lineRef:'Innenmass Bande (Ecken R 3.00 m)',
+    stufen:[{id:'std',name:'Spielfeld 40/20',L:40,B:20,Lmin:36,Lmax:41,Bmin:18,Bmax:20.5,sz:{stirn:1.5,laengs:1.5},lm:204,hint:'Torlinie 3.00 m ab Bande bis Linienmitte angenommen (BASPO-Skizze nicht eindeutig). Sicherheitszone 1.50 m ist eine Empfehlung.'}],
+    opts:[{k:'schiri',l:'Schiedsrichterraum (Halbkreis R 2.00 m)',t:'select',def:1,options:[[0,'keiner'],[1,'an der Seite oben (ungedreht)'],[2,'an der Seite unten (ungedreht)']]}],
+    build(f){
+      const g=G(),L=f.L,B=f.B,lw=f.lw,cy=B/2,o=f.opt,gx=3.00;
+      bandeG(g,L,B,3.00);
+      Ln(g,L/2,0,L/2,B,lw);bullyKreis(g,L/2,cy,lw);
+      if(+o.schiri===1)Ar(g,L/2,0,2.00-lw/2,0,PI,lw);
+      if(+o.schiri===2)Ar(g,L/2,B,2.00-lw/2,PI,TAU,lw);
+      const e=G();
+      Ln(e,gx,0,gx,B,lw);                                                // Torlinie über die ganze Breite
+      // Torraum: Halbkreis R 1.80 (Aussenkante) um die Mitte der Torlinie, Marken 15 × 15 cm 1.22 m vor der Torlinie
+      const rc=1.80-lw/2,a=Math.acos(clamp(lw/(2*rc),-1,1));Ar(e,gx,cy,rc,-a,a,lw);
+      const ym=Math.sqrt(rc*rc-1.22*1.22);
+      for(const s of [-1,1]){const yi=cy+s*(ym-lw/2);Ln(e,gx+1.22,yi,gx+1.22,yi-s*0.15,lw);Ln(e,gx+1.22,yi-s*lw/2,gx+1.22-0.15,yi-s*lw/2,lw);}
+      e.guides.push({shape:'rect',x:gx-1.12,y:cy-0.915,w:1.12,h:1.83});
+      for(const y of [4,B-4])bullyKreis(e,gx+6,y,lw);                    // Bullykreise 6.00 m vor der Torlinie, 4.00 m ab Bande
+      merge(g,e);merge(g,mirrorX(e,L));
+      DL(g,0,B,L,B,0,1.4);DL(g,0,0,0,B,-1.4,0);DL(g,0,1,gx,1,0,0);DL(g,gx,4,gx+6,4,0,-3.6);DL(g,gx+6,0,gx+6,4,-3.6,0);
+      DR(g,L/2,cy,3,-PI/4,'R 3.00');DR(g,gx,cy,1.8,PI/4,'R 1.80');
+      g.outline={x0:0,y0:0,x1:L,y1:B};g.labelAt={x:L*0.32,y:cy};
+      return shiftG(g,-L/2,-cy);
+    }},
+  rollhockey:{name:'Rollhockey',gruppe:'Ballspiele',quelle:'BASPO 801',farbeEmpf:'frei',defColor:'blau',lw:0.08,sized:true,lineRef:'Innenmass Bande (Ecken R 1.00 m)',
+    stufen:[{id:'std',name:'Spielfeld',L:40,B:20,Lmin:36,Lmax:44,Bmin:18,Bmax:22,sz:{stirn:1.5,laengs:1.5},lm:152,hint:'Sicherheitszone 1.50 m ist eine Empfehlung.'}],
+    opts:[],
+    build(f){
+      const g=G(),L=f.L,B=f.B,lw=f.lw,cy=B/2;
+      bandeG(g,L,B,1.00);
+      Ln(g,L/2,0,L/2,B,lw);Ar(g,L/2,cy,3.00-lw/2,0,TAU,lw);g.marks.push({kind:'cross',x:L/2,y:cy,size:0.20});
+      // Anti-Spiel-Linien: 22.00 m ab jeder Stirnseite (bei 44 m Länge fallen sie mit der Mittellinie zusammen)
+      const ag=22.00;if(Math.abs(L/2-ag)>0.1)for(const x of [ag-lw/2,L-ag+lw/2])Ln(g,x,0,x,B,lw);
+      // Strafraum 9.00 × 5.50 m (Aussenkanten), hintere Linie = Torlinie 3.00 m ab Bande
+      const e=G(),x0=3.00,x1=8.50,hb=4.50,gl=x0+lw;
+      rectC(e,x0+lw/2,cy-hb+lw/2,x1-lw/2,cy+hb-lw/2,lw);
+      const ac=gl-0.40,ra=1.90-lw/2,ph=Math.acos(clamp((gl-ac)/ra,-1,1));Ar(e,ac,cy,ra,-ph,ph,lw);  // Torraum R 1.90, Mittelpunkt 0.40 hinter der Torlinie
+      Ln(e,gl+0.50-lw/2,cy-0.94,gl+0.50-lw/2,cy+0.94,lw);              // Strich 1.88 m, 0.50 m vor der Torlinie
+      Ar(e,x1-lw/2,cy,0.15,0,TAU,lw);                                    // Penaltypunkt auf der vorderen Linie
+      for(const s of [-1,1])e.marks.push({kind:'cross',x:x1+4.90,y:cy+s*hb,size:0.20});
+      e.guides.push({shape:'rect',x:x0-1.05,y:cy-0.94,w:1.05,h:1.88});
+      merge(g,e);merge(g,mirrorX(e,L));
+      DL(g,0,B,L,B,0,1.4);DL(g,0,0,0,B,-1.4,0);DL(g,0,cy-hb,x0,cy-hb,0,0);DL(g,x0,cy-hb,x1,cy-hb,0,-0.6);DL(g,x1,cy-hb,x1+4.9,cy-hb,0,-0.6);
+      DL(g,x1,cy-hb,x1,cy+hb,0.7,0);DL(g,L-ag,B,L,B,0,0.7);DR(g,L/2,cy,3,-PI/4,'R 3.00');DR(g,ac,cy,1.9,PI/4,'R 1.90');
+      g.outline={x0:0,y0:0,x1:L,y1:B};g.labelAt={x:L*0.3,y:cy+3};
+      return shiftG(g,-L/2,-cy);
+    }},
+  landhockey:{name:'Landhockey',gruppe:'Ballspiele',quelle:'BASPO 801 (Stand 2010)',farbeEmpf:'weiss',defColor:'weiss',lw:0.075,sized:true,lineRef:'Aussenmass (Linien innerhalb)',
+    stufen:[{id:'std',name:'Spielfeld',L:91.4,B:55,sz:{stirn:4,laengs:5},lm:561}],
+    opts:[{k:'kreis5',l:'Gestrichelter Kreis 5.00 m ausserhalb des Schusskreises',t:'bool',def:true}],
+    build(f){
+      const g=G(),L=f.L,B=f.B,lw=f.lw,cy=B/2,gp=1.83;
+      rectIn(g,L,B,lw);Ln(g,L/2,lw,L/2,B-lw,lw);
+      const e=G();
+      Ln(e,22.90-lw/2,lw,22.90-lw/2,B-lw,lw);                           // 23-m-Linie (22.90 m bis Aussenkante)
+      // Schusskreis: Viertelkreise R 14.63 (Aussenkante) um die Innenkanten der Torpfosten, dazwischen 3.66 m gerade
+      const rc=14.63-lw/2,a=Math.acos(clamp(lw/rc,-1,1));
+      Ar(e,0,cy-gp,rc,-a,0,lw);Ar(e,0,cy+gp,rc,0,a,lw);Ln(e,rc,cy-gp,rc,cy+gp,lw);
+      if(f.opt.kreis5){                                                  // Striche 0.30 m, Lücken 3.00 m, beginnend in der Mitte
+        const rd=19.63-lw/2,ad=Math.acos(clamp(lw/rd,-1,1)),tot=gp+rd*ad,st=3.30,dl=0.30;
+        const pt=s=>s<=gp?{x:rd,y:s}:{x:rd*Math.cos((s-gp)/rd),y:gp+rd*Math.sin((s-gp)/rd)};
+        Ln(e,rd,cy-dl/2,rd,cy+dl/2,lw);
+        for(let k=1;k*st-dl/2<tot;k++){const s0=k*st-dl/2,s1=Math.min(tot,k*st+dl/2);if(s1-s0<0.05)continue;
+          const p=pt(s0),q=pt(s1);for(const sg of [-1,1])Ln(e,p.x,cy+sg*p.y,q.x,cy+sg*q.y,lw);}
+      }
+      e.marks.push({kind:'dot',x:lw+6.40,y:cy,size:0.15});              // Penaltypunkt ø 15 cm
+      for(const x of [5.00,14.63]){const xt=x-lw/2;Ln(e,xt,lw,xt,lw+0.30,lw);Ln(e,xt,B-lw,xt,B-lw-0.30,lw);}   // Marken innen an den Seitenlinien
+      for(const d of [5.00,10.00])for(const sg of [-1,1]){const y=cy+sg*(gp+d-lw/2);Ln(e,0,y,-0.30,y,lw);}     // Marken aussen an der Grundlinie
+      e.guides.push({shape:'rect',x:-1.20,y:cy-gp-0.05,w:1.20,h:2*gp+0.10});
+      merge(g,e);merge(g,mirrorX(e,L));
+      DL(g,0,B,L,B,0,2.0);DL(g,0,0,0,B,-2.0,0);DL(g,0,2,22.90,2,0,0);DL(g,0,cy+gp,14.63,cy+gp,0,0);DL(g,0,cy-1,lw+6.40,cy-1,0,0);
+      DR(g,0,cy-gp,14.63,-PI/4,'R 14.63');
+      g.outline={x0:0,y0:0,x1:L,y1:B};g.labelAt={x:L/2,y:cy-6};
       return shiftG(g,-L/2,-cy);
     }},
   sprint:{name:'Sprintbahn',gruppe:'Leichtathletik',quelle:'Swiss Athletics, Markierungsplan 2026',farbeEmpf:'weiss (Hürdenmarken farbig)',defColor:'weiss',lw:0.05,sized:false,

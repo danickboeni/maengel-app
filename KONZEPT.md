@@ -31,7 +31,7 @@ Mitarbeitende erfassen Mängel und Schadstellen auf Sportplätzen mit Foto und g
 ## Erweiterung: Markierungsplan (freigegeben am 21.11.2026)
 - Dritter Weg auf dem Startbildschirm: **«Markierungsplan»**, eigene Seite `markierung.html`.
 - **Eigenständig:** kein Bezug zu Plätzen, Mängeln oder Offerten.
-- **Plan:** Platzgrösse und Belag festlegen, Felder nach Sportart und Normstufe setzen (Basketball, Volleyball, Handball, Unihockey, Streetball, Fussball inkl. Junioren G–D, Sprintbahn, Weitsprung, Ballwurf, Kugel), dann alles von Hand verschieben, drehen und anpassen.
+- **Plan:** Platzgrösse und Belag festlegen, Felder nach Sportart und Normstufe setzen (Badminton, Basketball, Faustball, Fussball inkl. Junioren G–D, Handball, Inline Hockey, Korbball, Landhockey, Rollhockey, Streetball, Tennis, Unihockey, Volleyball, Sprintbahn, Weitsprung, Ballwurf, Kugel), dann alles von Hand verschieben, drehen und anpassen.
 - **Normen:** Unter die tiefste Stufe gehen ist erlaubt, gibt aber eine Warnung. Sicherheitszonen nach BASPO bis zum Rand des Belags; Verletzung = Warnung, kein Verbot.
 - **Weitsprung:** Nur der Anlauf muss auf dem Platz liegen; die Grube darf über den Platzrand hinaus (keine Meldung). Beim Ändern von Anlauf, Optionen und Drehung bleibt die Grube stehen.
 - **Volleyball-Netzpfosten** gelten als mobil: keine Warnung, wenn sie in einem anderen Feld oder dessen Sicherheitszone stehen. Feste Einbauteile (Korbmasten) werden weiter geprüft.

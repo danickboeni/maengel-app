@@ -1,7 +1,7 @@
 // Ausgabe: Mengenliste (CSV), DXF für CAD und Druck / PDF über den Browser.
 import { PI, TAU, deg, n4, f1, f2, num, esc, norm360, readRot } from './hilfen.js';
 import { COLOR, BELAG, NORM } from './normen.js';
-import { state, stufeOf, geoLocal, trig, toW, computeAll, getWarnings, quantities, allPosts, safetyPoly, LVNAME } from './pruefung.js';
+import { state, stufeOf, szOf, geoLocal, trig, toW, computeAll, getWarnings, quantities, allPosts, safetyPoly, LVNAME } from './pruefung.js';
 import { planExtents, planSVG, dimsWorld, dimSVG, lageChains, fieldExtents } from './zeichnen.js';
 const $=s=>document.querySelector(s);
 
