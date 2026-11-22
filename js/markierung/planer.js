@@ -104,7 +104,8 @@ function afterChange(){renderList();renderTabs();requestRender();$('#bUndo').dis
 function saveSettings(){try{localStorage.setItem(STORE_SET,JSON.stringify(settings));}catch(e){}}
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem(STORE_SET)||'null');
   // Einstellungen von vor sv 2: alter Standard-Fang 5 cm wird zu 1 cm
-  if(s){if(!s.sv&&s.snap===0.05)s.snap=0.01;s.sv=2;Object.assign(settings,s);}}catch(e){}}
+  if(s){if(!s.sv&&s.snap===0.05)s.snap=0.01;s.sv=2;Object.assign(settings,s);}}catch(e){}
+  if(!settings.zu||typeof settings.zu!=='object')settings.zu={};}
 function sanitize(o){
   if(!o||typeof o!=='object'||!o.platz||!Array.isArray(o.fields))throw new Error('Keine gültige Projektdatei.');
   const P={L:clamp(+o.platz.L||40,5,300),B:clamp(+o.platz.B||20,5,300),belag:BELAG[o.platz.belag]?o.platz.belag:'kunststoff_rot'};
@@ -171,21 +172,25 @@ function renderProps(){
       <div class="info">${N.sized?`Feld ${f2(f.L)} × ${f2(f.B)} m (${esc(N.lineRef)})<br>`:''}Mitte X ${f2(f.x)} m · Y ${f2(f.y)} m · Drehung ${num(norm360(f.rot))}°<br>Priorität ${f.prio} · Linien ${num(f.lw*100)} cm ${COLOR[f.color].name}<br>Sicherheitszone: ${szText(sz)}</div>
       <div class="info" id="elInfo"></div><p class="small muted">Bearbeiten am PC oder Tablet.</p>`;
     updateInfo();return;}
+  // Gegliedert: Kopf, Masse, Lage, Linien, Optionen, Übersicht; Duplizieren und Löschen getrennt ganz unten
   let h=`<label class="fld"><span>Name</span><input type="text" data-f="name" value="${esc(f.name)}"></label>
-  <div class="small muted" style="margin:-4px 0 8px">${esc(N.name)} · Quelle: ${esc(N.quelle)}</div>
+  <div class="small muted" style="margin:-4px 0 4px">${esc(N.name)} · Quelle: ${esc(N.quelle)}</div>
+  <h4 class="gruppe">Masse</h4>
   <label class="fld"><span>Normstufe</span><select data-f="stufe">${N.stufen.map(s=>`<option value="${s.id}" ${s.id===f.stufe?'selected':''}>${esc(s.name)}${s.L?` – ${stufeMass(s)}`:''}</option>`).join('')}</select></label>`;
   if(N.sized){const isNorm=Math.abs(f.L-st.L)<0.005&&Math.abs(f.B-st.B)<0.005;
     h+=`<div class="g2"><label class="fld"><span>Länge <em>(m)</em></span><input type="number" data-f="L" step="0.01" min="1" max="200" value="${num(f.L)}"></label><label class="fld"><span>Breite <em>(m)</em></span><input type="number" data-f="B" step="0.01" min="1" max="200" value="${num(f.B)}"></label></div>
     <div class="small muted" style="margin:-4px 0 8px">${esc(N.lineRef)} · Norm ${num(st.L)} × ${num(st.B)} m ${isNorm?'✓':`· <button class="btn sm" data-a="normsize">Normmass</button>`}</div>`;}
-  h+=`<div class="g3"><label class="fld"><span>X <em>(m)</em></span><input type="number" data-f="x" step="0.01" value="${+f.x.toFixed(3)}"></label><label class="fld"><span>Y <em>(m)</em></span><input type="number" data-f="y" step="0.01" value="${+f.y.toFixed(3)}"></label><label class="fld"><span>Drehung <em>(°)</em></span><input type="number" data-f="rot" step="1" value="${+(+f.rot).toFixed(2)}"></label></div>
-  <div class="small muted" style="margin:-4px 0 6px">Bezugspunkt: Feldmitte, ab Platzecke oben links</div>
-  <div class="btnrow"><button class="btn sm" data-a="rotL">⟲ 90°</button><button class="btn sm" data-a="rotR">⟳ 90°</button><button class="btn sm" data-a="center">Auf Platz zentrieren</button><button class="btn sm" data-a="dup">Duplizieren</button><button class="btn sm danger" data-a="del">Löschen</button></div>
+  h+=`<div class="small muted">Sicherheitszone: ${szText(sz)}${sz.stirn2!==sz.stirn?' (Stirn: links / rechts bei 0°)':''}</div>
+  <h4 class="gruppe">Lage <em>(Feldmitte, ab Platzecke oben links)</em></h4>
+  <div class="g3"><label class="fld"><span>X <em>(m)</em></span><input type="number" data-f="x" step="0.01" value="${+f.x.toFixed(3)}"></label><label class="fld"><span>Y <em>(m)</em></span><input type="number" data-f="y" step="0.01" value="${+f.y.toFixed(3)}"></label><label class="fld"><span>Drehung <em>(°)</em></span><input type="number" data-f="rot" step="1" value="${+(+f.rot).toFixed(2)}"></label></div>
+  <div class="btnrow"><button class="btn sm" data-a="rotL">⟲ 90°</button><button class="btn sm" data-a="rotR">⟳ 90°</button><button class="btn sm" data-a="center">Auf Platz zentrieren</button></div>
+  <h4 class="gruppe">Linien</h4>
   <div class="g2"><label class="fld"><span>Priorität <em>(1 = Hauptfeld)</em></span><input type="number" data-f="prio" min="1" max="${PRIO_MAX}" step="1" value="${f.prio}"></label><label class="fld"><span>Linienbreite <em>(cm)</em></span><input type="number" data-f="lwcm" min="2" max="20" step="1" value="${num(f.lw*100)}"></label></div>
   <div class="fld"><span>Linienfarbe <em>· BASPO: ${esc(N.farbeEmpf)}</em></span><div class="swatches">${COLORS.map(c=>`<button class="swb ${c.id===f.color?'on':''}" data-color="${c.id}" title="${c.name}" style="background:${c.hex}"></button>`).join('')}</div></div>`;
   const vopts=(N.opts||[]).filter(d=>!d.if||d.if(f.opt,f));
-  if(vopts.length)h+=`<h4>Optionen</h4><div class="g2">${vopts.map(d=>optInput(d,f.opt[d.k])).join('')}</div>`;
-  h+=`<div class="info" id="elInfo"></div>`;
-  h+=`<div class="small muted">Sicherheitszone (${esc(st.name)}): ${szText(sz)}${sz.stirn2!==sz.stirn?' (Stirn: links / rechts bei 0°)':''}</div>`;
+  if(vopts.length)h+=`<h4 class="gruppe">Optionen</h4><div class="g2">${vopts.map(d=>optInput(d,f.opt[d.k])).join('')}</div>`;
+  h+=`<div class="info" id="elInfo"></div>
+  <div class="btnrow unten"><button class="btn sm" data-a="dup">Duplizieren</button><span class="spacer"></span><button class="btn sm danger" data-a="del">Feld löschen</button></div>`;
   el.innerHTML=h;updateInfo();
 }
 function updateInfo(){
@@ -228,7 +233,7 @@ function select(id){sel=id;renderList();renderProps();requestRender();}
 function syncPlatzInputs(){const P=state.platz;for(const [id,v] of [['#pL',P.L],['#pB',P.B]]){const i=$(id);if(document.activeElement!==i)i.value=num(+v.toFixed(2));i.disabled=hatRand();i.title=hatRand()?'Aus dem Platzrand der CAD-Unterlage (umschliessendes Rechteck)':'';}$('#pBelag').value=P.belag;$('#projName').value=state.name;}
 const stufeMass=s=>s.L?(s.Lmin!=null?`${num(s.L)} × ${num(s.B)} m (Bandbreite ${num(s.Lmin)}–${num(s.Lmax)} × ${num(s.Bmin)}–${num(s.Bmax)} m)`:`${num(s.L)} × ${num(s.B)} m`):'';
 function fillAddStufen(){const N=NORM[$('#addSport').value];$('#addStufe').innerHTML=N.stufen.map(s=>`<option value="${s.id}">${esc(s.name)}${s.L?` – ${stufeMass(s)}`:''}</option>`).join('');updateAddInfo();}
-function updateAddInfo(){const N=NORM[$('#addSport').value],st=N.stufen.find(s=>s.id===$('#addStufe').value)||N.stufen[0];
+function updateAddInfo(){const N=NORM[$('#addSport').value],st=N.stufen.find(s=>s.id===$('#addStufe').value)||N.stufen[0];abschnitteKurzinfo();
   $('#addInfo').innerHTML=`Quelle: ${esc(N.quelle)}<br>Linien: ${num(N.lw*100)} cm, ${esc(N.farbeEmpf)}${(st.sz.stirn||st.sz.laengs)?`<br>Sicherheitszone: ${szText({stirn:st.sz.stirn,laengs:st.sz.laengs,stirn2:st.sz.stirn2!=null?st.sz.stirn2:st.sz.stirn})}`:''}`;}
 function addField(){const P=state.platz,f=makeField($('#addSport').value,$('#addStufe').value,Math.round(P.L/2*10)/10,Math.round(P.B/2*10)/10,0);
   // Feld in der Platzmitte; liegt der Teil, der auf den Platz muss, nicht ganz drauf (z. B. Weitsprung-Anlauf), so weit wie nötig verschieben
@@ -276,23 +281,42 @@ function rotateSel(d){const f=getSel();if(!f)return;const a0=ankerWelt(f);f.rot=
 function duplicateSel(){const f=getSel();if(!f)return;const c=JSON.parse(JSON.stringify(f));c.id=newId();c.name=uniqueName(f.name.replace(/ \d+$/,''));c.x+=2;c.y+=2;state.fields.push(c);sel=c.id;commit();renderProps();}
 function deleteSel(){const f=getSel();if(!f)return;state.fields=state.fields.filter(x=>x!==f);sel=null;commit();renderProps();}
 
+/* ---- Abschnitte links: ein-/zuklappen, Kurzinfo im zugeklappten Titel ---- */
+function abschnitteAnwenden(){
+  for(const s of document.querySelectorAll('section.ab')){const zu=!!settings.zu[s.dataset.ab];s.classList.toggle('zu',zu);
+    const b=s.querySelector('.abk-b');if(b)b.setAttribute('aria-expanded',String(!zu));}
+}
+function abschnitteKurzinfo(){
+  if(!state)return;const P=state.platz,U=state.unterlage,n=state.fields.length,sp=NORM[$('#addSport').value];
+  $('#zPlatz').textContent=`${f2(P.L)} × ${f2(P.B)} m${hatRand()?' (Vieleck)':''} · ${BELAG[P.belag].name}`;
+  $('#zUnterlage').textContent=U?U.name:'keine';
+  $('#zFeld').textContent=sp?sp.name:'';
+  $('#zListe').textContent=`${n} ${n===1?'Feld':'Felder'}`;
+  // Auge im Titel der Unterlage und Schalter im Menü «Ansicht»
+  const an=!!(U&&uGeo),auge=$('#uAuge'),su=$('#sUnterlage');
+  auge.hidden=!an;if(an){auge.innerHTML=U.sicht!==false?ICON.eye:ICON.eyeOff;auge.title=U.sicht!==false?'Unterlage ausblenden':'Unterlage einblenden';}
+  su.disabled=!an;su.checked=an&&U.sicht!==false;su.closest('label').title=an?'':'Keine CAD-Unterlage geladen';
+}
+
 /* ---- CAD-Unterlage und Platzrand ---- */
-let ebenenOffen=false;
+let ebenenOffen=false,lageOffen=false;
 function renderUnterlage(){
+  abschnitteKurzinfo();
   const box=$('#uBox'),ri=$('#randInfo');if(!box||!state)return;const U=state.unterlage;
   ri.innerHTML=hatRand()?`<div class="info">Platzrand aus der CAD-Unterlage: Vieleck mit ${state.platz.rand.length} Ecken. Länge und Breite = umschliessendes Rechteck.
     <div class="btnrow" style="margin:6px 0 0"><button class="btn sm" data-u="drehL" title="Ganzen Plan drehen">⟲ 90°</button><button class="btn sm" data-u="drehR" title="Ganzen Plan drehen">⟳ 90°</button><button class="btn sm" data-u="rechteck">Wieder Rechteck</button></div></div>`:'';
   if(!U){box.innerHTML=`<button class="btn wide" data-u="laden">DXF-Datei laden …</button><div class="small muted" style="margin-top:6px">Plan vom Architekten als Hintergrund, z. B. um einen schiefen Platzrand zu übernehmen. DWG zuerst als DXF speichern (z. B. ODA File Converter).</div>`;return;}
   if(!uGeo){box.innerHTML=`<div class="small">Die Linien der Unterlage «${esc(U.name)}» fehlen auf diesem Gerät.</div><div class="btnrow"><button class="btn sm" data-u="laden">DXF neu laden …</button><button class="btn sm danger" data-u="weg">Entfernen</button></div>`;return;}
   const aus=new Set(U.aus||[]),g=zeichnungsGroesse(uGeo,U.einheit),nv=uGeo.ebenen.filter(e=>!aus.has(e)).length;
-  box.innerHTML=`<div class="small" style="margin-bottom:6px"><b>${esc(U.name)}</b><br>${uGeo.polys.length} ${uGeo.polys.length===1?'Linie':'Linien'} ·${f1(g.w)} × ${f1(g.h)} m${uGeo.gekuerzt?' · <span class="c-warnung">gekürzt (sehr grosse Zeichnung)</span>':''}</div>
-    <label class="chk"><input type="checkbox" data-u="sicht" ${U.sicht!==false?'checked':''}> Unterlage anzeigen</label>
+  // Hauptknöpfe oben; Lage und Ebenen zugeklappt; Datei-Knöpfe unten
+  box.innerHTML=`<div class="small" style="margin-bottom:6px">${uGeo.polys.length} ${uGeo.polys.length===1?'Linie':'Linien'} · ${f1(g.w)} × ${f1(g.h)} m${U.sicht===false?' · <span class="c-warnung">ausgeblendet</span>':''}${uGeo.gekuerzt?' · <span class="c-warnung">gekürzt (sehr grosse Zeichnung)</span>':''}</div>
+    <div class="btnrow"><button class="btn sm primary" data-u="rand" title="Geschlossene Linie der Unterlage als Platzrand verwenden">Platzrand übernehmen …</button><button class="btn sm" data-u="ausrichten" title="Eine Kante gerade richten, dann einen Eckpunkt auf die Platzecke oben links setzen">Ausrichten …</button></div>
+    <details id="uLage" class="unter" ${lageOffen?'open':''}><summary class="small">Lage fein einstellen</summary>
     <div class="g2"><label class="fld"><span>Einheit der Zeichnung</span><select data-u="einheit">${Object.keys(EINHEITEN).map(e=>`<option value="${e}" ${e===U.einheit?'selected':''}>${e}${e===uGeo.datei?' (laut Datei)':''}</option>`).join('')}</select></label>
       <label class="fld"><span>Drehung <em>(°)</em></span><input type="number" step="0.01" data-u="rot" value="${+(+U.rot).toFixed(3)}"></label></div>
     <div class="g2"><label class="fld"><span>Verschiebung X <em>(m)</em></span><input type="number" step="0.01" data-u="tx" value="${+(+U.tx).toFixed(3)}"></label>
-      <label class="fld"><span>Verschiebung Y <em>(m)</em></span><input type="number" step="0.01" data-u="ty" value="${+(+U.ty).toFixed(3)}"></label></div>
-    <div class="btnrow"><button class="btn sm" data-u="ausrichten" title="Eine Kante gerade richten, dann einen Eckpunkt auf die Platzecke oben links setzen">Ausrichten …</button><button class="btn sm primary" data-u="rand" title="Geschlossene Linie der Unterlage als Platzrand verwenden">Platzrand übernehmen …</button></div>
-    <details id="uEbenen" ${ebenenOffen?'open':''}><summary class="small">Ebenen (${nv} von ${uGeo.ebenen.length} sichtbar)</summary>
+      <label class="fld"><span>Verschiebung Y <em>(m)</em></span><input type="number" step="0.01" data-u="ty" value="${+(+U.ty).toFixed(3)}"></label></div></details>
+    <details id="uEbenen" class="unter" ${ebenenOffen?'open':''}><summary class="small">Ebenen (${nv} von ${uGeo.ebenen.length} sichtbar)</summary>
       <div class="btnrow"><button class="btn sm" data-u="alle">alle</button><button class="btn sm" data-u="keine">keine</button></div>
       <div class="ebenen">${uGeo.ebenen.map(e=>`<label class="chk"><input type="checkbox" data-eb="${esc(e)}" ${aus.has(e)?'':'checked'}> ${esc(e)}</label>`).join('')}</div></details>
     <div class="btnrow"><button class="btn sm" data-u="zeigen">Ganze Unterlage zeigen</button><button class="btn sm" data-u="laden">Andere Datei …</button><button class="btn sm danger" data-u="weg">Entfernen</button></div>`;
@@ -350,6 +374,8 @@ function randUebernehmen(pts){
   const r=state.platz.rand,w=Math.max(...r.map(q=>q[0]))-Math.min(...r.map(q=>q[0])),h=Math.max(...r.map(q=>q[1]))-Math.min(...r.map(q=>q[1]));
   if(h>w*1.02)planBewegen(-90,0,0);
   const rechteck=randNormieren();
+  // Unterlage wird danach meist nicht mehr gebraucht: Abschnitt zuklappen
+  settings.zu={...settings.zu,unterlage:true};saveSettings();abschnitteAnwenden();
   commit();renderProps();fitView();
   meldung(rechteck?`Platz ist ein Rechteck: ${f2(state.platz.L)} × ${f2(state.platz.B)} m übernommen.`:`Platzrand übernommen: ${state.platz.rand.length} Ecken, umschliessendes Rechteck ${f2(state.platz.L)} × ${f2(state.platz.B)} m.`);
 }
@@ -419,7 +445,7 @@ function bind(){
     if(k==='einheit'&&EINHEITEN[t.value]){U.einheit=t.value;commit();return;}
     if(k==='rot'||k==='tx'||k==='ty'){const v=parseFloat(t.value);if(isFinite(v)){U[k]=k==='rot'?norm360(v):v;commit();}}};
   for(const el of [$('#uBox'),$('#randInfo')]){el.addEventListener('click',uKlick);el.addEventListener('change',uAenderung);}
-  $('#uBox').addEventListener('toggle',e=>{if(e.target.id==='uEbenen')ebenenOffen=e.target.open;},true);
+  $('#uBox').addEventListener('toggle',e=>{if(e.target.id==='uEbenen')ebenenOffen=e.target.open;if(e.target.id==='uLage')lageOffen=e.target.open;},true);
   $('#modusHint').addEventListener('click',e=>{if(e.target.closest('[data-modus]'))modusEnde();});
   setUnterlageDruck(gw=>state.unterlage&&uGeo?unterlageSVG(uGeo,state.unterlage,{gw}):'');
   for(const [id,k] of [['#pL','L'],['#pB','B']]){const i=$(id);
@@ -431,13 +457,18 @@ function bind(){
   for(const [id,k] of Object.entries(toggles)){const i=$('#'+id);i.checked=!!settings[k];i.addEventListener('change',()=>{settings[k]=i.checked;saveSettings();if(k==='gaps')afterChange();else requestRender();});}
   const sn=$('#sSnap');sn.value=String(settings.snap);if(sn.value==='')sn.value='0.01';sn.addEventListener('change',()=>{settings.snap=parseFloat(sn.value)||0;saveSettings();});
   $('#bUndo').addEventListener('click',undo);$('#bRedo').addEventListener('click',redo);
-  // Plan als Datei: Zustand und (falls vorhanden) die Linien der CAD-Unterlage in einer Datei
-  $('#bSave').addEventListener('click',()=>{const daten={app:'markierungsplaner',version:1,...state};let t=JSON.stringify(daten,null,2);
-    if(state.unterlage&&uGeo)t=t.replace(/\n}$/,`,\n  "unterlageDaten": ${JSON.stringify(uGeo)}\n}`);
-    download(fname('json'),t,'application/json');});
+  // Menüs oben: beim Klick ausserhalb schliessen; «Ausgabe» schliesst nach der Wahl
+  document.addEventListener('click',e=>{
+    for(const m of document.querySelectorAll('details.menu[open]'))if(!e.target.closest('details.menu')||e.target.closest('details.menu')!==m)m.open=false;});
+  $('#bHilfe').addEventListener('click',()=>$('#dlgHilfe').showModal());
+  $('#hilfeZu').addEventListener('click',()=>$('#dlgHilfe').close());
+  // Abschnitte links ein- und zuklappen
+  document.querySelectorAll('.abk-b').forEach(b=>b.addEventListener('click',()=>{const k=b.dataset.ab;settings.zu={...settings.zu,[k]:!settings.zu[k]};saveSettings();abschnitteAnwenden();}));
+  $('#uAuge').addEventListener('click',()=>{const U=state.unterlage;if(!U||nurAnsicht())return;U.sicht=U.sicht===false;commit();});
+  $('#sUnterlage').addEventListener('change',e=>{const U=state.unterlage;if(!U)return;U.sicht=e.target.checked;commit();});
   $('#wcount').addEventListener('click',()=>setTab('warn'));
   document.querySelectorAll('.tabs button').forEach(b=>b.addEventListener('click',()=>setTab(b.dataset.tab)));
-  document.addEventListener('click',e=>{const b=e.target.closest('[data-exp]');if(b){$('#mExport').open=false;doExport(b.dataset.exp);}else if(!e.target.closest('#mExport'))$('#mExport').open=false;});
+  document.addEventListener('click',e=>{const b=e.target.closest('[data-exp]');if(b){$('#mExport').open=false;doExport(b.dataset.exp);}});
   $('#zIn').addEventListener('click',()=>{const r=svg.getBoundingClientRect();zoomAt(r.width/2,r.height/2,1.3);});
   $('#zOut').addEventListener('click',()=>{const r=svg.getBoundingClientRect();zoomAt(r.width/2,r.height/2,1/1.3);});
   $('#zFit').addEventListener('click',fitView);
@@ -578,7 +609,7 @@ function bind(){
     if(mod&&k==='z'){e.preventDefault();e.shiftKey?redo():undo();return;}
     if(mod&&k==='y'){e.preventDefault();redo();return;}
     if(mod&&k==='d'){e.preventDefault();duplicateSel();return;}
-    if(mod&&k==='s'){e.preventDefault();$('#bSave').click();return;}
+    if(mod&&k==='s'){e.preventDefault();planAlsDatei();return;}
     const f=getSel();
     // Pfeiltasten: 1 cm, Shift 10 cm, Ctrl 1 m
     const mv={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
@@ -600,7 +631,12 @@ function bind(){
 }
 
 /* ================= Ausgabe ================= */
+// Plan als Datei: Zustand und (falls vorhanden) die Linien der CAD-Unterlage in einer Datei
+function planAlsDatei(){const daten={app:'markierungsplaner',version:1,...state};let t=JSON.stringify(daten,null,2);
+  if(state.unterlage&&uGeo)t=t.replace(/\n}$/,`,\n  "unterlageDaten": ${JSON.stringify(uGeo)}\n}`);
+  download(fname('json'),t,'application/json');}
 function doExport(kind){
+  if(kind==='json'){planAlsDatei();return;}
   if(kind==='print'){$('#prTitle').value=state.name;$('#prUnterlageZeile').hidden=!(state.unterlage&&uGeo);updatePrintInfo();$('#dlgPrint').showModal();return;}
   if(kind==='dxf'){download(fname('dxf'),buildDXF(),'application/dxf');return;}
   if(kind==='svg'){const ext=planExtents(true,1),U=state.unterlage,us=U&&uGeo&&U.sicht!==false?unterlageSVG(uGeo,U,{gw:0.03}):'';
@@ -655,7 +691,7 @@ function listeBinden(){
 
 /* ================= Start ================= */
 function init(){
-  loadSettings();listeBinden();
+  loadSettings();abschnitteAnwenden();listeBinden();
   const handyModus=()=>{document.body.classList.toggle('nur-ansicht',nurAnsicht());$('#projName').readOnly=nurAnsicht();if(document.body.dataset.ansicht==='plan'){renderProps();requestRender();}};
   handyModus();handyAbfrage.addEventListener('change',handyModus);
   window.addEventListener('hashchange',route);

@@ -34,10 +34,30 @@
 <header>
   <a class="btn zurueck" href="#/" title="Zurück zur Liste der Pläne">← Pläne</a>
   <input id="projName" title="Name des Plans" spellcheck="false">
-  <div class="sep"></div>
-  <button class="btn" id="bSave" title="Plan als Datei speichern, z.B. zum Weitergeben (Ctrl+S)">Als Datei</button>
+  <div class="sep nur-pc"></div>
+  <button class="btn nur-pc" id="bUndo" title="Rückgängig (Ctrl+Z)">↶</button>
+  <button class="btn nur-pc" id="bRedo" title="Wiederholen (Ctrl+Y)">↷</button>
+  <span class="wcount" id="wcount" title="Warnungen anzeigen"></span>
+  <div class="spacer"></div>
+  <details class="menu" id="mAnsicht"><summary class="btn">Ansicht ▾</summary>
+    <div class="pop pop-r">
+      <div class="pop-t">Anzeigen</div>
+      <label class="mchk"><input type="checkbox" id="sGrid"> Raster</label>
+      <label class="mchk"><input type="checkbox" id="sSafety"> Sicherheitszonen</label>
+      <label class="mchk"><input type="checkbox" id="sDims"> Abstände zum Platzrand</label>
+      <label class="mchk"><input type="checkbox" id="sNotes"> Beschriftung</label>
+      <label class="mchk"><input type="checkbox" id="sThick"> Linien betonen</label>
+      <label class="mchk nur-pc"><input type="checkbox" id="sGaps"> Kreuzungen unterbrechen</label>
+      <label class="mchk"><input type="checkbox" id="sUnterlage"> CAD-Unterlage</label>
+      <div class="pop-t nur-pc">Beim Ziehen</div>
+      <label class="mchk nur-pc" title="Am Platzrand, in der Platzmitte und an der Sicherheitszone einrasten (Alt gedrückt = ohne)"><input type="checkbox" id="sMagnet"> Einrasten</label>
+      <label class="mchk nur-pc">Fang <select id="sSnap"><option value="0">aus</option><option value="0.01">1 cm</option><option value="0.05">5 cm</option><option value="0.1">10 cm</option><option value="0.5">50 cm</option><option value="1">1 m</option></select></label>
+    </div>
+  </details>
   <details class="menu" id="mExport"><summary class="btn">Ausgabe ▾</summary>
-    <div class="pop">
+    <div class="pop pop-r">
+      <button data-exp="json" title="Zum Weitergeben oder als Sicherung (Ctrl+S)">Plan als Datei speichern</button>
+      <hr>
       <button data-exp="print">Plan drucken / als PDF</button>
       <button data-exp="dxf">DXF für CAD (Meter)</button>
       <button data-exp="svg">SVG (Vektorgrafik)</button>
@@ -45,67 +65,39 @@
       <button data-exp="pts">Einbauteile mit Koordinaten (CSV)</button>
     </div>
   </details>
-  <div class="sep nur-pc"></div>
-  <button class="btn nur-pc" id="bUndo" title="Rückgängig (Ctrl+Z)">↶</button>
-  <button class="btn nur-pc" id="bRedo" title="Wiederholen (Ctrl+Y)">↷</button>
-  <span class="wcount" id="wcount" title="Warnungen anzeigen"></span>
-  <div class="spacer"></div>
-  <label class="tog"><input type="checkbox" id="sGrid"> Raster</label>
-  <label class="tog"><input type="checkbox" id="sSafety"> Sicherheitszonen</label>
-  <label class="tog"><input type="checkbox" id="sDims"> Abstände</label>
-  <label class="tog"><input type="checkbox" id="sNotes"> Beschriftung</label>
-  <label class="tog nur-pc"><input type="checkbox" id="sGaps"> Kreuzungen unterbrechen</label>
-  <label class="tog"><input type="checkbox" id="sThick"> Linien betonen</label>
-  <label class="tog nur-pc" title="Beim Ziehen am Platzrand, in der Platzmitte und an der Sicherheitszone einrasten (Alt gedrückt = ohne)"><input type="checkbox" id="sMagnet"> Einrasten</label>
-  <label class="tog nur-pc">Fang <select id="sSnap"><option value="0">aus</option><option value="0.01">1 cm</option><option value="0.05">5 cm</option><option value="0.1">10 cm</option><option value="0.5">50 cm</option><option value="1">1 m</option></select></label>
+  <button class="btn nur-pc" id="bHilfe" title="Bedienung">?</button>
 </header>
 
 <div id="app">
   <aside id="left">
-    <section class="nur-pc">
-      <h3>1 · Platz</h3>
-      <div class="g2">
-        <label class="fld"><span>Länge <em>(m)</em></span><input type="number" id="pL" step="0.5" min="5" max="300"></label>
-        <label class="fld"><span>Breite <em>(m)</em></span><input type="number" id="pB" step="0.5" min="5" max="300"></label>
+    <!-- Abschnitte: Titel anklicken = ein-/zuklappen (Zustand wird auf dem Gerät gemerkt) -->
+    <section class="nur-pc ab" data-ab="platz">
+      <h3 class="abk"><button class="abk-b" data-ab="platz" aria-expanded="true"><span class="pfeil"></span>1 · Platz</button><span class="abk-z" id="zPlatz"></span></h3>
+      <div class="ab-inhalt">
+        <div class="g2">
+          <label class="fld"><span>Länge <em>(m)</em></span><input type="number" id="pL" step="0.5" min="5" max="300"></label>
+          <label class="fld"><span>Breite <em>(m)</em></span><input type="number" id="pB" step="0.5" min="5" max="300"></label>
+        </div>
+        <label class="fld" title="Der Belagsrand ist die Grenze für alle Prüfungen"><span>Belag</span><select id="pBelag"></select></label>
+        <div id="randInfo"></div>
       </div>
-      <label class="fld"><span>Belag</span><select id="pBelag"></select></label>
-      <div class="small muted">Der Belagsrand ist die Grenze für alle Prüfungen.</div>
-      <div id="randInfo"></div>
     </section>
-    <section class="nur-pc">
-      <h3>CAD-Unterlage</h3>
-      <div id="uBox"></div>
+    <section class="nur-pc ab" data-ab="unterlage">
+      <h3 class="abk"><button class="abk-b" data-ab="unterlage" aria-expanded="true"><span class="pfeil"></span>2 · CAD-Unterlage</button><span class="abk-z" id="zUnterlage"></span><button class="ib" id="uAuge" title="Unterlage ein-/ausblenden" hidden></button></h3>
+      <div class="ab-inhalt"><div id="uBox"></div></div>
     </section>
-    <section class="nur-pc">
-      <h3>2 · Feld hinzufügen</h3>
-      <label class="fld"><span>Sportart</span><select id="addSport"></select></label>
-      <label class="fld"><span>Normstufe</span><select id="addStufe"></select></label>
-      <div class="small muted" id="addInfo" style="margin-bottom:8px"></div>
-      <button class="btn primary wide" id="bAdd">Feld auf den Platz setzen</button>
+    <section class="nur-pc ab" data-ab="feld">
+      <h3 class="abk"><button class="abk-b" data-ab="feld" aria-expanded="true"><span class="pfeil"></span>3 · Feld hinzufügen</button><span class="abk-z" id="zFeld"></span></h3>
+      <div class="ab-inhalt">
+        <label class="fld"><span>Sportart</span><select id="addSport"></select></label>
+        <label class="fld"><span>Normstufe</span><select id="addStufe"></select></label>
+        <div class="small muted" id="addInfo" style="margin-bottom:8px"></div>
+        <button class="btn primary wide" id="bAdd">Feld auf den Platz setzen</button>
+      </div>
     </section>
-    <section>
-      <h3>Felder im Plan</h3>
-      <div id="list"></div>
-    </section>
-    <section class="nur-pc">
-      <details><summary class="small">Bedienung</summary>
-        <ul class="help">
-          <li>Feld anklicken = auswählen, ziehen = verschieben</li>
-          <li>Nochmals klicken = darunterliegendes Feld wählen</li>
-          <li>Felder im Plan: Zeile nach oben oder unten ziehen = Priorität ändern (Tablet: am Griff ⠿). Zwischen zwei Zeilen loslassen = eigene Priorität, auf eine Zeile = gleiche Priorität wie diese. <kbd>Esc</kbd> = abbrechen</li>
-          <li>Runder Griff = drehen (15°-Schritte, Shift = 1°)</li>
-          <li>Leere Fläche ziehen = Ansicht verschieben, Mausrad oder zwei Finger = Zoom</li>
-          <li>Beim Ziehen rastet das Feld am Platzrand, in der Platzmitte und an der Sicherheitszone ein (blaue Hilfslinie). <kbd>Alt</kbd> gedrückt halten = ohne Einrasten</li>
-          <li>Pfeiltasten = 1 cm verschieben (Shift: 10 cm, Ctrl: 1 m), ohne Einrasten</li>
-          <li>Weitsprung: Beim Ändern von Anlauf, Optionen und Drehung bleibt die Grube stehen. Die Grube darf über den Platzrand hinaus.</li>
-          <li><kbd>R</kbd> / <kbd>Shift</kbd>+<kbd>R</kbd> = 90° drehen, <kbd>Ctrl</kbd>+<kbd>D</kbd> = duplizieren, <kbd>Entf</kbd> = löschen</li>
-          <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> = rückgängig / wiederholen, <kbd>F</kbd> = Platz einpassen</li>
-          <li>Koordinaten: ab Platzecke oben links, X nach rechts, Y nach unten</li>
-          <li>CAD-Unterlage: DXF vom Architekten laden (DWG zuerst als DXF speichern). «Ausrichten»: Kante anklicken, die gerade werden soll, dann den Eckpunkt, der auf die Platzecke oben links kommt. Ebenen einzeln ausblenden.</li>
-          <li>«Platzrand übernehmen»: den Platzrand in der Unterlage anklicken (geschlossene Linien werden bevorzugt) oder in die Platzfläche klicken (kleinste geschlossene Linie um den Punkt). Die gelbe Vorschau zeigt, was übernommen wird. Der Platz wird zum Vieleck, die längste Kante liegt waagrecht. Alle Prüfungen gelten dann für den echten Rand. Felder und Unterlage bleiben zueinander an Ort und Stelle.</li>
-          <li>Der Plan wird automatisch gespeichert.</li>
-        </ul>
-      </details>
+    <section class="ab" data-ab="liste">
+      <h3 class="abk"><button class="abk-b" data-ab="liste" aria-expanded="true"><span class="pfeil"></span>Felder im Plan</button><span class="abk-z" id="zListe"></span></h3>
+      <div class="ab-inhalt"><div id="list"></div></div>
     </section>
   </aside>
 
@@ -134,6 +126,39 @@
 
 <input type="file" id="fileIn" accept=".json,application/json" hidden>
 <input type="file" id="dxfIn" accept=".dxf" hidden>
+
+<dialog id="dlgHilfe" class="hilfe">
+  <h2>Bedienung</h2>
+  <h4>Platz</h4>
+  <ul class="help">
+    <li>Der Belagsrand ist die Grenze für alle Prüfungen.</li>
+    <li>Koordinaten: ab Platzecke oben links, X nach rechts, Y nach unten.</li>
+    <li>Der Plan wird automatisch gespeichert.</li>
+  </ul>
+  <h4>Felder</h4>
+  <ul class="help">
+    <li>Feld anklicken = auswählen, ziehen = verschieben. Nochmals klicken = darunterliegendes Feld wählen.</li>
+    <li>Runder Griff = drehen (15°-Schritte, <kbd>Shift</kbd> = 1°).</li>
+    <li>Beim Ziehen rastet das Feld am Platzrand, in der Platzmitte und an der Sicherheitszone ein (blaue Hilfslinie). <kbd>Alt</kbd> gedrückt halten = ohne Einrasten. Ein- und ausschalten unter «Ansicht».</li>
+    <li>Pfeiltasten = 1 cm verschieben (<kbd>Shift</kbd>: 10 cm, <kbd>Ctrl</kbd>: 1 m), ohne Einrasten.</li>
+    <li>Felder im Plan: Zeile nach oben oder unten ziehen = Priorität ändern (Tablet: am Griff ⠿). Zwischen zwei Zeilen loslassen = eigene Priorität, auf eine Zeile = gleiche Priorität wie diese. <kbd>Esc</kbd> = abbrechen.</li>
+    <li>Weitsprung: Beim Ändern von Anlauf, Optionen und Drehung bleibt die Grube stehen. Die Grube darf über den Platzrand hinaus.</li>
+  </ul>
+  <h4>CAD-Unterlage</h4>
+  <ul class="help">
+    <li>DXF vom Architekten laden (auch binäres DXF; DWG zuerst als DXF speichern). Ebenen einzeln ausblenden.</li>
+    <li>«Ausrichten»: Kante anklicken, die gerade werden soll, dann den Eckpunkt, der auf die Platzecke oben links kommt.</li>
+    <li>«Platzrand übernehmen»: den Platzrand anklicken (geschlossene Linien werden bevorzugt) oder in die Platzfläche klicken (kleinste geschlossene Linie um den Punkt). Die gelbe Vorschau zeigt, was übernommen wird. Der Platz wird zum Vieleck, die längste Kante liegt waagrecht; alle Prüfungen gelten dann für den echten Rand.</li>
+  </ul>
+  <h4>Ansicht und Tasten</h4>
+  <ul class="help">
+    <li>Leere Fläche ziehen = Ansicht verschieben, Mausrad oder zwei Finger = Zoom, <kbd>F</kbd> = Platz einpassen.</li>
+    <li><kbd>R</kbd> / <kbd>Shift</kbd>+<kbd>R</kbd> = 90° drehen, <kbd>Ctrl</kbd>+<kbd>D</kbd> = duplizieren, <kbd>Entf</kbd> = löschen.</li>
+    <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> = rückgängig / wiederholen, <kbd>Ctrl</kbd>+<kbd>S</kbd> = Plan als Datei speichern.</li>
+    <li>Abschnitte links: Titel anklicken = ein- oder zuklappen.</li>
+  </ul>
+  <div class="dlgbtns"><button class="btn primary" id="hilfeZu">Schliessen</button></div>
+</dialog>
 
 <dialog id="dlgPrint">
   <h2>Plan drucken / als PDF speichern</h2>

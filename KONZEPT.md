@@ -41,6 +41,7 @@ Mitarbeitende erfassen Mängel und Schadstellen auf Sportplätzen mit Foto und g
 - **Platzrand als Vieleck:** Geschlossene Linie der Unterlage (oder Linien, die sich treffen) als Platzrand übernehmen. Die längste Kante wird waagrecht gelegt, Länge × Breite = umschliessendes Rechteck. Prüfungen (Platzrand, Sicherheitszonen, Einbauteile), Belag, Einrasten, DXF und Druck nutzen den echten Rand; Lagemasse im Druck ab dem Bezugsrechteck. Felder und Unterlage werden dabei mitbewegt.
 - **Ausgabe:** Browserdruck / PDF mit Gesamtplan, Lagemassen, Detailblatt pro Feld zum Einmessen und Mengen; dazu DXF, SVG und CSV.
 - **Bedienung:** voll am PC und Tablet. Auf dem Handy nur ansehen (Plan, Warnungen, Mengen, Druck).
+- **Aufbau der Oberfläche:** Kopfzeile in einer Zeile mit den Menüs «Ansicht» (Anzeige-Schalter, Einrasten, Fang), «Ausgabe» (Plan als Datei, Druck, DXF, SVG, CSV) und «?» (Bedienung). Links einklappbare Abschnitte 1 · Platz, 2 · CAD-Unterlage, 3 · Feld hinzufügen, Felder im Plan (Zustand pro Gerät gemerkt). Rechts im Reiter «Feld» Gruppen Masse, Lage, Linien, Optionen; Duplizieren und Löschen getrennt unten.
 - Pläne liegen in IndexedDB (Store `markierungsplaene`) und sind Teil der Sicherung (Format 3). Einzelne Pläne lassen sich zusätzlich als Datei speichern und öffnen.
 - Annahmen ohne Quelle sind in der App gekennzeichnet (z. B. Kugelstoss-Masse, Tiefe der Technischen Zone).
 
