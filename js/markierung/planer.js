@@ -2,7 +2,7 @@
 import * as db from '../db.js';
 import { PI, TAU, rad, deg, clamp, n4, f1, f2, num, esc, norm360, readRot } from './hilfen.js';
 import { COLORS, COLOR, BELAEGE, BELAG, NORM } from './normen.js';
-import { state, setState, settings, newId, uniqueName, stufeOf, szOf, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, sides, LVNAME, getWarnings, quantities, allPosts } from './pruefung.js';
+import { state, setState, settings, newId, uniqueName, stufeOf, szOf, szSeite, szText, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, sides, LVNAME, getWarnings, quantities, allPosts } from './pruefung.js';
 import { contentSVG, platzOutline, planExtents, planSVG } from './zeichnen.js';
 import { csvCell, buildCSV, buildDXF, printOpts, updatePrintInfo, buildPrint, doPrint } from './druck.js';
 const $=s=>document.querySelector(s);
@@ -44,7 +44,7 @@ function renderOverlay(){
     h+=`<polygon points="${pts.map(p=>n4(p.x)+','+n4(p.y)).join(' ')}" class="selbox"/>`;
     const hp=handlePos(f);h+=`<line x1="${n4(hp.top.x)}" y1="${n4(hp.top.y)}" x2="${n4(hp.x)}" y2="${n4(hp.y)}" class="selline"/><circle cx="${n4(hp.x)}" cy="${n4(hp.y)}" r="${n4(7/view.s)}" class="handle"/>`;
     if(settings.dims){const sz=szOf(f);
-      for(const sd of sides(f)){const t=sd.midAvail,req=sd.stirn?sz.stirn:sz.laengs,bad=t<req-0.005||t<0;
+      for(const sd of sides(f)){const t=sd.midAvail,req=szSeite(sz,sd),bad=t<req-0.005||t<0;
         if(!isFinite(t))continue;const e={x:sd.mid.x+sd.nw.x*Math.max(t,0),y:sd.mid.y+sd.nw.y*Math.max(t,0)},tk=5/view.s,px=-sd.nw.y*tk,py=sd.nw.x*tk;
         h+=`<line x1="${n4(sd.mid.x)}" y1="${n4(sd.mid.y)}" x2="${n4(e.x)}" y2="${n4(e.y)}" class="dim${bad?' bad':''}"/>`;
         h+=`<line x1="${n4(e.x-px)}" y1="${n4(e.y-py)}" x2="${n4(e.x+px)}" y2="${n4(e.y+py)}" class="dim${bad?' bad':''}"/>`;
@@ -128,7 +128,7 @@ function renderProps(){
   const N=NORM[f.sport],st=stufeOf(f),sz=szOf(f);
   if(nurAnsicht()){   // Handy: nur ansehen
     el.innerHTML=`<h3>${esc(f.name)}</h3><div class="small muted" style="margin:-4px 0 8px">${esc(N.name)} · ${esc(st.name)}</div>
-      <div class="info">${N.sized?`Feld ${f2(f.L)} × ${f2(f.B)} m (${esc(N.lineRef)})<br>`:''}Mitte X ${f2(f.x)} m · Y ${f2(f.y)} m · Drehung ${num(norm360(f.rot))}°<br>Priorität ${f.prio} · Linien ${num(f.lw*100)} cm ${COLOR[f.color].name}<br>Sicherheitszone: Stirn ${f2(sz.stirn)} m, Längs ${f2(sz.laengs)} m</div>
+      <div class="info">${N.sized?`Feld ${f2(f.L)} × ${f2(f.B)} m (${esc(N.lineRef)})<br>`:''}Mitte X ${f2(f.x)} m · Y ${f2(f.y)} m · Drehung ${num(norm360(f.rot))}°<br>Priorität ${f.prio} · Linien ${num(f.lw*100)} cm ${COLOR[f.color].name}<br>Sicherheitszone: ${szText(sz)}</div>
       <div class="info" id="elInfo"></div><p class="small muted">Bearbeiten am PC oder Tablet.</p>`;
     updateInfo();return;}
   let h=`<label class="fld"><span>Name</span><input type="text" data-f="name" value="${esc(f.name)}"></label>
@@ -145,13 +145,13 @@ function renderProps(){
   const vopts=(N.opts||[]).filter(d=>!d.if||d.if(f.opt,f));
   if(vopts.length)h+=`<h4>Optionen</h4><div class="g2">${vopts.map(d=>optInput(d,f.opt[d.k])).join('')}</div>`;
   h+=`<div class="info" id="elInfo"></div>`;
-  h+=`<div class="small muted">Sicherheitszone (${esc(st.name)}): Stirnseiten ${f2(sz.stirn)} m, Längsseiten ${f2(sz.laengs)} m</div>`;
+  h+=`<div class="small muted">Sicherheitszone (${esc(st.name)}): ${szText(sz)}${sz.stirn2!==sz.stirn?' (Stirn: links / rechts bei 0°)':''}</div>`;
   el.innerHTML=h;updateInfo();
 }
 function updateInfo(){
   const el=$('#elInfo'),f=getSel();if(!el||!f)return;
   const q=quantities().per.find(p=>p.f.id===f.id),b=geoLocal(f).outline,sz=szOf(f);
-  el.innerHTML=`Linien: <b>${f1(q?q.len:0)} m</b>${q&&q.ref?` · BASPO: ${f2(q.ref)} m`:''}<br>Ausdehnung inkl. Sicherheitszone: ${f2(b.x1-b.x0+2*sz.stirn)} × ${f2(b.y1-b.y0+2*sz.laengs)} m`;
+  el.innerHTML=`Linien: <b>${f1(q?q.len:0)} m</b>${q&&q.ref?` · BASPO: ${f2(q.ref)} m`:''}<br>Ausdehnung inkl. Sicherheitszone: ${f2(b.x1-b.x0+sz.stirn+sz.stirn2)} × ${f2(b.y1-b.y0+2*sz.laengs)} m`;
 }
 function syncXY(f){for(const k of ['x','y','rot']){const i=document.querySelector(`#tab-props [data-f="${k}"]`);if(i&&document.activeElement!==i)i.value=k==='rot'?+(+f.rot).toFixed(2):+f[k].toFixed(3);}}
 function updateWarnCount(){
@@ -189,7 +189,7 @@ function syncPlatzInputs(){const P=state.platz;for(const [id,v] of [['#pL',P.L],
 const stufeMass=s=>s.L?(s.Lmin!=null?`${num(s.L)} × ${num(s.B)} m (Bandbreite ${num(s.Lmin)}–${num(s.Lmax)} × ${num(s.Bmin)}–${num(s.Bmax)} m)`:`${num(s.L)} × ${num(s.B)} m`):'';
 function fillAddStufen(){const N=NORM[$('#addSport').value];$('#addStufe').innerHTML=N.stufen.map(s=>`<option value="${s.id}">${esc(s.name)}${s.L?` – ${stufeMass(s)}`:''}</option>`).join('');updateAddInfo();}
 function updateAddInfo(){const N=NORM[$('#addSport').value],st=N.stufen.find(s=>s.id===$('#addStufe').value)||N.stufen[0];
-  $('#addInfo').innerHTML=`Quelle: ${esc(N.quelle)}<br>Linien: ${num(N.lw*100)} cm, ${esc(N.farbeEmpf)}${(st.sz.stirn||st.sz.laengs)?`<br>Sicherheitszone: Stirn ${f2(st.sz.stirn)} m, Längs ${f2(st.sz.laengs)} m`:''}`;}
+  $('#addInfo').innerHTML=`Quelle: ${esc(N.quelle)}<br>Linien: ${num(N.lw*100)} cm, ${esc(N.farbeEmpf)}${(st.sz.stirn||st.sz.laengs)?`<br>Sicherheitszone: ${szText({stirn:st.sz.stirn,laengs:st.sz.laengs,stirn2:st.sz.stirn2!=null?st.sz.stirn2:st.sz.stirn})}`:''}`;}
 function addField(){const P=state.platz,f=makeField($('#addSport').value,$('#addStufe').value,Math.round(P.L/2*10)/10,Math.round(P.B/2*10)/10,0);state.fields.push(f);sel=f.id;setTab('props');commit();renderProps();}
 // Fester Punkt eines Felds (z. B. Weitsprung: Vorderkante Grube). Beim Ändern der Optionen
 // wird das Feld so nachgeschoben, dass dieser Punkt auf dem Platz an Ort und Stelle bleibt.
@@ -206,7 +206,7 @@ function einrasten(f,nx,ny){
   kanten(g.platzBox||b,'rand');   // Weitsprung: Anlaufkanten; Grubenkanten kommen über g.fang
   if(g.fang){g.fang.x.forEach(v=>m.push(['x',v,'rand',0]));g.fang.y.forEach(v=>m.push(['y',v,'rand',0]));}
   m.push(['x',(b.x0+b.x1)/2,'mitte',0],['y',(b.y0+b.y1)/2,'mitte',0]);
-  if(sz.stirn>0)m.push(['x',b.x0-sz.stirn,'sz',-1],['x',b.x1+sz.stirn,'sz',1]);
+  if(sz.stirn>0)m.push(['x',b.x0-sz.stirn,'sz',-1]);if(sz.stirn2>0)m.push(['x',b.x1+sz.stirn2,'sz',1]);
   if(sz.laengs>0)m.push(['y',b.y0-sz.laengs,'sz',-1],['y',b.y1+sz.laengs,'sz',1]);
   const pos={x:nx,y:ny},best={x:null,y:null},sg=v=>v<0?-1:1;
   for(const [la,v,art,seite] of m){

@@ -117,6 +117,29 @@ function clipTop(r,cyc,lw){let phi=-Math.acos(clamp(lw/r,-1,1));const s=(lw-cyc)
 
 /* ================= Normen (BASPO 801, Swiss Athletics 2022, SO Deutschland 2016) ================= */
 const MAST_OPTS=[[1,'1.00 m (Ausladung 2.25 m)'],[0.4,'0.40 m (Ausladung 1.65 m)'],[0,'0.00 m (Ausladung 1.25 m)']];
+// Korbbereich nach FIBA (Basketball und 3x3): Zone 4.90 m, Freiwurflinie bis 5.80 m, Dreipunkt- bzw. Zweipunktlinie
+// R 6.75 m um den Punkt 1.575 m vor der Grundlinie, No-Charge-Halbkreis, Positionsmarken, Brett 1.20 m und Ring
+// als Hilfslinie, Korbmast. Innenkante der Grundlinie bei x = 0, Linien 5 cm.
+function korbZone(e,cy,lw,o,ftKreis){
+  const bx=1.575,kh=2.45-lw/2,xf=5.80-lw/2;
+  Ln(e,0,cy-kh,5.80-lw,cy-kh,lw);Ln(e,0,cy+kh,5.80-lw,cy+kh,lw);
+  Ln(e,xf,cy-2.45,xf,cy+2.45,lw);
+  if(ftKreis)Ar(e,xf,cy,1.80-lw/2,-PI/2,PI/2,lw);
+  const r3=6.75-lw/2,corner=Math.max(0,+o.corner||0);
+  const dyc=corner>0?cy-corner-lw/2:cy-lw/2;
+  if(dyc>0&&dyc<r3){const xi=bx+Math.sqrt(r3*r3-dyc*dyc),phi=Math.asin(dyc/r3);
+    if(corner>0){Ln(e,0,cy-dyc,xi,cy-dyc,lw);Ln(e,0,cy+dyc,xi,cy+dyc,lw);}
+    Ar(e,bx,cy,r3,-phi,phi,lw);}
+  else{const phi=Math.acos(clamp(-bx/r3,-1,1));Ar(e,bx,cy,r3,-phi,phi,lw);}
+  if(o.nocharge){const rn=1.25+lw/2;Ar(e,bx,cy,rn,-PI/2,PI/2,lw);Ln(e,1.20,cy-rn,bx,cy-rn,lw);Ln(e,1.20,cy+rn,bx,cy+rn,lw);}
+  // Positionsmarken an beiden Seiten der Zone (FIBA/BASPO: 175 | 5 | 85 | 40 | 85 | 5 | 85 | 5 | 95 cm ab Innenkante Grundlinie)
+  if(o.posmarks)for(const sg of [-1,1]){const y0=cy+sg*2.45,y1=cy+sg*2.55;
+    for(const xm of [1.775,3.925,4.825])Ln(e,xm,y0,xm,y1,0.05);
+    Ln(e,2.65,cy+sg*2.50,3.05,cy+sg*2.50,0.10);}
+  e.guides.push({shape:'line',x1:1.20,y1:cy-0.9,x2:1.20,y2:cy+0.9},{shape:'circle',cx:bx,cy,r:0.225});
+  e.posts.push({x:-lw-(+o.mast),y:cy,label:'Korbmast'});
+  return {bx,corner};
+}
 const NORM={
   basketball:{name:'Basketball',gruppe:'Ballspiele',quelle:'BASPO 801 / swissbasketball',farbeEmpf:'weiss oder schwarz (nur Basketball: weiss)',defColor:'weiss',lw:0.05,sized:true,lineRef:'Innenmass (Linien ausserhalb)',
     stufen:[
@@ -140,33 +163,38 @@ const NORM={
       rectOut(g,L,B,lw);
       Ln(g,L/2,0,L/2,B,lw);Ln(g,L/2,-lw-0.15,L/2,-lw,lw);Ln(g,L/2,B+lw,L/2,B+lw+0.15,lw);
       Ar(g,L/2,cy,1.80-lw/2,0,TAU,lw);
-      const e=G(),bx=1.575,kh=2.45-lw/2,xf=5.80-lw/2;
-      Ln(e,0,cy-kh,5.80-lw,cy-kh,lw);Ln(e,0,cy+kh,5.80-lw,cy+kh,lw);
-      Ln(e,xf,cy-2.45,xf,cy+2.45,lw);
-      Ar(e,xf,cy,1.80-lw/2,-PI/2,PI/2,lw);
-      const r3=6.75-lw/2,corner=Math.max(0,+o.corner||0);
-      const dyc=corner>0?cy-corner-lw/2:cy-lw/2;
-      if(dyc>0&&dyc<r3){const xi=bx+Math.sqrt(r3*r3-dyc*dyc),phi=Math.asin(dyc/r3);
-        if(corner>0){Ln(e,0,cy-dyc,xi,cy-dyc,lw);Ln(e,0,cy+dyc,xi,cy+dyc,lw);}
-        Ar(e,bx,cy,r3,-phi,phi,lw);}
-      else{const phi=Math.acos(clamp(-bx/r3,-1,1));Ar(e,bx,cy,r3,-phi,phi,lw);}
-      if(o.nocharge){const rn=1.25+lw/2;Ar(e,bx,cy,rn,-PI/2,PI/2,lw);Ln(e,1.20,cy-rn,bx,cy-rn,lw);Ln(e,1.20,cy+rn,bx,cy+rn,lw);}
+      const e=G(),{bx,corner}=korbZone(e,cy,lw,o,true);
       if(o.throwin){const xt=8.325-lw/2;Ln(e,xt,-lw,xt,-lw-0.15,lw);if(o.throwin2)Ln(e,xt,B+lw,xt,B+lw+0.15,lw);}
-      // Positionsmarken an beiden Seiten der Zone (BASPO 801: 175 | 5 | 85 | 40 | 85 | 5 | 85 | 5 | 95 cm ab Innenkante Endlinie)
-      if(o.posmarks)for(const sg of [-1,1]){const y0=cy+sg*2.45,y1=cy+sg*2.55;
-        for(const xm of [1.775,3.925,4.825])Ln(e,xm,y0,xm,y1,0.05);
-        Ln(e,2.65,cy+sg*2.50,3.05,cy+sg*2.50,0.10);}
       // Mannschaftsbankbereich: Verlängerung der Endlinie und Linie 5.00 m vor der Mittellinie, nach aussen
       const bl=+o.bank||0;
       if(bl>0){const yb0=B+lw,yb1=B+lw+bl;Ln(e,-lw/2,yb0,-lw/2,yb1,lw);const xb=L/2-5.025;Ln(e,xb,yb0,xb,yb1,lw);}
-      e.guides.push({shape:'line',x1:1.20,y1:cy-0.9,x2:1.20,y2:cy+0.9},{shape:'circle',cx:bx,cy,r:0.225});
-      e.posts.push({x:-lw-(+o.mast),y:cy,label:'Korbmast'});
       merge(g,e);merge(g,mirrorX(e,L));
       // Masse für den Markierer (linke Hälfte, rechte symmetrisch); Feldmasse ab Innenkante Linie
       DL(g,0,B+lw,L,B+lw,0,1.6);DL(g,-lw,0,-lw,B,-1.6,0);
       DL(g,5.80,cy-2.45,5.80,cy+2.45,0.9,0);DL(g,0,cy+2.45,5.80,cy+2.45,0,0.5);DL(g,0,cy-0.9,bx,cy-0.9,0,-0.4);
       DR(g,bx,cy,6.75,-PI/5,'R 6.75');if(corner>0)DL(g,1.0,0,1.0,corner,-0.45,0);DR(g,L/2,cy,1.80,-PI/4,'R 1.80');
       g.outline={x0:-lw,y0:-lw,x1:L+lw,y1:B+lw};g.labelAt={x:L/2,y:cy+2.9};
+      return shiftG(g,-L/2,-cy);
+    }},
+  basket3x3:{name:'Basketball 3x3',gruppe:'Ballspiele',quelle:'FIBA 3x3 Official Rules; Equipment Appendix (Dezember 2024)',farbeEmpf:'weiss oder Kontrastfarbe, alle Linien gleich',defColor:'weiss',lw:0.05,sized:true,lineRef:'Innenmass (Linien ausserhalb)',
+    // Grundlinie (beim Korb) bei 0° links, Endlinie rechts: freie Zone 2 m an der Grundlinie, 1 m an der Endlinie
+    stufen:[
+      {id:'fiba',name:'FIBA 3x3 (Seiten 1.50 m)',L:11,B:15,sz:{stirn:2,stirn2:1,laengs:1.5}},
+      {id:'eng',name:'FIBA 3x3, wenig Platz (Seiten 1.00 m)',L:11,B:15,sz:{stirn:2,stirn2:1,laengs:1}},
+    ],
+    opts:[
+      {k:'mast',l:'Korbmast hinter Grundlinie',t:'select',def:0.9,options:[[0.9,'0.90 m (Level 1, Ausladung 2.15 m)'],[0.4,'0.40 m (Level 2, Ausladung 1.65 m)']]},
+      {k:'posmarks',l:'Positionsmarken an der Zone',t:'bool',def:true},
+      {k:'nocharge',l:'No-Charge-Halbkreis',t:'bool',def:true},
+    ],
+    build(f){
+      const g=G(),L=f.L,B=f.B,lw=f.lw,cy=B/2,o=f.opt;
+      rectOut(g,L,B,lw);                                                 // Grund-, End- und Seitenlinien gehören nicht zum Feld
+      const {bx}=korbZone(g,cy,lw,{...o,corner:0.90},false);            // wie Basketball, ohne Freiwurf-Halbkreis
+      DL(g,0,B+lw,L,B+lw,0,1.2);DL(g,-lw,0,-lw,B,-1.4,0);
+      DL(g,5.80,cy-2.45,5.80,cy+2.45,0.9,0);DL(g,0,cy+2.45,5.80,cy+2.45,0,0.5);DL(g,0,cy-0.9,bx,cy-0.9,0,-0.4);
+      DR(g,bx,cy,6.75,-PI/5,'R 6.75');DL(g,1.0,0,1.0,0.90,-0.45,0);
+      g.outline={x0:-lw,y0:-lw,x1:L+lw,y1:B+lw};g.labelAt={x:L*0.82,y:cy};
       return shiftG(g,-L/2,-cy);
     }},
   volleyball:{name:'Volleyball',gruppe:'Ballspiele',quelle:'Swiss Volley, Offizielle Volleyball-Regeln 2025–2028; Freizonen Regional/NLB/NLA aus BASPO 801 (2010)',farbeEmpf:'helle Farbe',defColor:'gelb',lw:0.05,sized:true,lineRef:'Aussenmass (Linien innerhalb)',

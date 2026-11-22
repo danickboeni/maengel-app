@@ -11,7 +11,10 @@ let uidN=0;const newId=()=>'f'+Date.now().toString(36)+(uidN++).toString(36)+Mat
 function uniqueName(base){const s=new Set(state.fields.map(f=>f.name));if(!s.has(base))return base;let i=2;while(s.has(base+' '+i))i++;return base+' '+i;}
 function nextPrio(){return state.fields.length?Math.min(9,Math.max(...state.fields.map(f=>f.prio))+1):1;}
 function stufeOf(f){const N=NORM[f.sport];return N.stufen.find(s=>s.id===f.stufe)||N.stufen[0];}
-function szOf(f){return stufeOf(f).sz||{stirn:0,laengs:0};}
+// Sicherheitszone: stirn = Stirnseite links (lokal x0), stirn2 = Stirnseite rechts (x1, z.B. 3x3 Endlinie), laengs = Längsseiten
+function szOf(f){const s=stufeOf(f).sz||{};return {stirn:s.stirn||0,laengs:s.laengs||0,stirn2:s.stirn2!=null?s.stirn2:(s.stirn||0)};}
+function szSeite(sz,sd){return sd.id==='s2'?sz.stirn2:sd.stirn?sz.stirn:sz.laengs;}
+function szText(sz){return `Stirn ${sz.stirn2!==sz.stirn?`${f2(sz.stirn)} / ${f2(sz.stirn2)}`:f2(sz.stirn)} m, Längs ${f2(sz.laengs)} m`;}
 function makeField(sport,stufeId,x,y,rot=0,over={}){
   const N=NORM[sport],st=N.stufen.find(s=>s.id===stufeId)||N.stufen[0],opt={};
   // «neu»: Wert nur für neu gesetzte Felder; bestehende Pläne bekommen beim Laden «def» (alte Darstellung bleibt)
@@ -134,7 +137,7 @@ function getWarnings(){
     const over={links:Math.max(0,-Math.min(...cs.map(p=>p.x))),rechts:Math.max(0,Math.max(...cs.map(p=>p.x))-P.L),oben:Math.max(0,-Math.min(...cs.map(p=>p.y))),unten:Math.max(0,Math.max(...cs.map(p=>p.y))-P.B)};
     const ov=Object.entries(over).filter(([,v])=>v>0.005);
     if(ov.length)add(`out:${f.id}`,'hoch',f,`${f.name}: ragt über den Platzrand (${ov.map(([k,v])=>`${k} ${f2(v)} m`).join(', ')}).`);
-    for(const sd of sides(f)){const req=sd.stirn?sz.stirn:sz.laengs;
+    for(const sd of sides(f)){const req=szSeite(sz,sd);
       if(req>0&&sd.avail>=-0.005&&sd.avail<req-0.005)add(`sz:${f.id}:${sd.id}`,'hoch',f,`${f.name}: Sicherheitszone ${sd.name} nur ${f2(Math.max(0,sd.avail))} m statt ${f2(req)} m.`);}
     g.warns.forEach((t,i)=>add(`gw:${f.id}:${i}`,'warnung',f,`${f.name}: ${t}`));
     g.hints.forEach((t,i)=>add(`gh:${f.id}:${i}`,'hinweis',f,`${f.name}: ${t}`));
@@ -144,7 +147,7 @@ function getWarnings(){
   // Mobile Einbauteile (Volleyball-Netzpfosten) dürfen in anderen Feldern stehen
   for(const f of fs){geoLocal(f).posts.forEach((p,i)=>{if(p.mobil)return;const wp=toW(f,p.x,p.y);
     for(const o of fs){if(o===f)continue;const b=geoLocal(o).outline,sz=szOf(o),q=toL(o,wp.x,wp.y);
-      const inF=q.x>=b.x0&&q.x<=b.x1&&q.y>=b.y0&&q.y<=b.y1,inS=q.x>=b.x0-sz.stirn&&q.x<=b.x1+sz.stirn&&q.y>=b.y0-sz.laengs&&q.y<=b.y1+sz.laengs;
+      const inF=q.x>=b.x0&&q.x<=b.x1&&q.y>=b.y0&&q.y<=b.y1,inS=q.x>=b.x0-sz.stirn&&q.x<=b.x1+sz.stirn2&&q.y>=b.y0-sz.laengs&&q.y<=b.y1+sz.laengs;
       if(inF||inS)add(`post:${f.id}:${i}:${o.id}`,'warnung',f,`${f.name}: ${p.label} liegt ${inF?(NORM[o.sport].sized?'im Spielfeld':'im Bereich'):'in der Sicherheitszone'} von ${o.name}.`);}});}
   for(const f of fs){const out=geoLocal(f).posts.filter(p=>{const q=toW(f,p.x,p.y);return q.x<-1e-6||q.y<-1e-6||q.x>P.L+1e-6||q.y>P.B+1e-6;});
     if(out.length)add(`postout:${f.id}`,'hinweis',f,`${f.name}: ${out.length} ${out.length>1?'Einbauteile liegen':'Einbauteil liegt'} ausserhalb des Platzes (${[...new Set(out.map(p=>p.label))].join(', ')}).`);}
@@ -172,6 +175,6 @@ function quantities(){
   return {lines:Object.values(lines).sort((a,b)=>COLORS.findIndex(c=>c.id===a.c)-COLORS.findIndex(c=>c.id===b.c)||b.w-a.w),marks:Object.values(marks),digits,per,tot,totA};
 }
 function allPosts(){const out=[];for(const {f,w} of computeAll())w.posts.forEach(p=>out.push({f,label:p.label,x:p.x,y:p.y}));return out;}
-function safetyPoly(f){const b=geoLocal(f).outline,sz=szOf(f);return [[b.x0-sz.stirn,b.y0-sz.laengs],[b.x1+sz.stirn,b.y0-sz.laengs],[b.x1+sz.stirn,b.y1+sz.laengs],[b.x0-sz.stirn,b.y1+sz.laengs]].map(p=>toW(f,p[0],p[1]));}
+function safetyPoly(f){const b=geoLocal(f).outline,sz=szOf(f);return [[b.x0-sz.stirn,b.y0-sz.laengs],[b.x1+sz.stirn2,b.y0-sz.laengs],[b.x1+sz.stirn2,b.y1+sz.laengs],[b.x0-sz.stirn,b.y1+sz.laengs]].map(p=>toW(f,p[0],p[1]));}
 
-export { newId, uniqueName, nextPrio, stufeOf, szOf, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, stateKey, sides, LV, LVNAME, getWarnings, markName, quantities, allPosts, safetyPoly };
+export { newId, uniqueName, nextPrio, stufeOf, szOf, szSeite, szText, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, stateKey, sides, LV, LVNAME, getWarnings, markName, quantities, allPosts, safetyPoly };

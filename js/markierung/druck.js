@@ -35,7 +35,7 @@ function buildDXF(){
     g.objs.forEach(ob=>{if(ob.shape==='rect'){const q=[Wp(ob.x,ob.y),Wp(ob.x+ob.w,ob.y),Wp(ob.x+ob.w,ob.y+ob.h),Wp(ob.x,ob.y+ob.h)];for(let i=0;i<4;i++)LINE('OBJEKTE',9,q[i],q[(i+1)%4]);}
       else if(ob.shape==='circle'){const p=Wp(ob.cx,ob.cy);ARC('OBJEKTE',9,p.x,p.y,ob.r,0,TAU);}
       else{const p=Wp(ob.cx,ob.cy);ARC('OBJEKTE',9,p.x,p.y,ob.r0,ob.a0+th,ob.a1+th);ARC('OBJEKTE',9,p.x,p.y,ob.r1,ob.a0+th,ob.a1+th);}});
-    const sz=szOf(f);if(sz.stirn>0||sz.laengs>0){const q=safetyPoly(f);for(let i=0;i<4;i++)LINE('SICHERHEITSZONEN',1,q[i],q[(i+1)%4]);}
+    const sz=szOf(f);if(sz.stirn>0||sz.stirn2>0||sz.laengs>0){const q=safetyPoly(f);for(let i=0;i<4;i++)LINE('SICHERHEITSZONEN',1,q[i],q[(i+1)%4]);}
     w.posts.forEach(p=>{ent('POINT','EINBAUTEILE',6,[[10,p.x],[20,B-p.y],[30,0]]);ARC('EINBAUTEILE',6,p.x,p.y,0.15,0,TAU);TEXT('EINBAUTEILE',6,{x:p.x,y:p.y-0.45},0.25,`${p.label} X=${f2(p.x)} Y=${f2(p.y)}`);});
     const la=g.labelAt;if(la)TEXT('BESCHRIFTUNG',7,Wp(la.x,la.y),0.6,f.name,readRot(f.rot));
   }

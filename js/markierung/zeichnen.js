@@ -49,7 +49,7 @@ function contentSVG(o){
   const P=state.platz,all=computeAll().filter(a=>!o.only||a.f.id===o.only),warns=getWarnings();let s='';
   s+=`<rect x="0" y="0" width="${n4(P.L)}" height="${n4(P.B)}" fill="${BELAG[P.belag].hex}"/>`;
   if(o.gridSvg)s+=o.gridSvg;
-  if(o.safety)for(const {f} of all){const sz=szOf(f);if(!(sz.stirn>0||sz.laengs>0))continue;
+  if(o.safety)for(const {f} of all){const sz=szOf(f);if(!(sz.stirn>0||sz.stirn2>0||sz.laengs>0))continue;
     const bad=warns.some(w=>w.fid===f.id&&w.level==='hoch'&&!state.acks[w.key]);
     s+=`<polygon points="${safetyPoly(f).map(p=>n4(p.x)+','+n4(p.y)).join(' ')}" fill="${o.screen&&f.id===o.sel?'rgba(255,255,255,.07)':'none'}" ${strokeAttr(o,bad?'#ff5c5c':o.szcol,o.screen?'7 4':true)}/>`;}
   for(const {f} of all){const g=geoLocal(f);if(g.objs.length)s+=`<g transform="${trAttr(f)}">${g.objs.map(ob=>objSVG(ob,o)).join('')}</g>`;}
