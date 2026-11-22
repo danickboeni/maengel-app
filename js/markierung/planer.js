@@ -2,7 +2,7 @@
 import * as db from '../db.js';
 import { PI, TAU, rad, deg, clamp, n4, f1, f2, num, esc, norm360, readRot } from './hilfen.js';
 import { COLORS, COLOR, BELAEGE, BELAG, NORM } from './normen.js';
-import { state, setState, settings, newId, uniqueName, stufeOf, szOf, szSeite, szText, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, sides, LVNAME, getWarnings, quantities, allPosts } from './pruefung.js';
+import { state, setState, settings, PRIO_MAX, newId,uniqueName, stufeOf, szOf, szSeite, szText, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, sides, LVNAME, getWarnings, quantities, allPosts } from './pruefung.js';
 import { contentSVG, platzOutline, planExtents, planSVG } from './zeichnen.js';
 import { csvCell, buildCSV, buildDXF, printOpts, updatePrintInfo, buildPrint, doPrint } from './druck.js';
 const $=s=>document.querySelector(s);
@@ -87,7 +87,7 @@ function sanitize(o){
   const P={L:clamp(+o.platz.L||40,5,300),B:clamp(+o.platz.B||20,5,300),belag:BELAG[o.platz.belag]?o.platz.belag:'kunststoff_rot'};
   const ALIAS={fussball:{I:'SL',II:'CL'}};   // ältere Stufen-Kennungen
   const fields=o.fields.filter(f=>f&&NORM[f.sport]).map(f=>{const N=NORM[f.sport],sid=(ALIAS[f.sport]||{})[f.stufe]||f.stufe,st=N.stufen.find(s=>s.id===sid)||N.stufen[0],opt={};(N.opts||[]).forEach(d=>opt[d.k]=d.def);Object.assign(opt,st.opt||{},f.opt||{});
-    return {id:String(f.id||newId()),sport:f.sport,stufe:st.id,name:String(f.name||N.name),x:+f.x||0,y:+f.y||0,rot:+f.rot||0,prio:clamp(Math.round(+f.prio||1),1,9),color:COLOR[f.color]?f.color:N.defColor,lw:clamp(+f.lw||N.lw,0.02,0.2),L:+f.L||st.L||0,B:+f.B||st.B||0,hidden:!!f.hidden,opt};});
+    return {id:String(f.id||newId()),sport:f.sport,stufe:st.id,name:String(f.name||N.name),x:+f.x||0,y:+f.y||0,rot:+f.rot||0,prio:clamp(Math.round(+f.prio||1),1,PRIO_MAX),color:COLOR[f.color]?f.color:N.defColor,lw:clamp(+f.lw||N.lw,0.02,0.2),L:+f.L||st.L||0,B:+f.B||st.B||0,hidden:!!f.hidden,opt};});
   return {name:String(o.name||'Projekt'),platz:P,fields,acks:(o.acks&&typeof o.acks==='object')?o.acks:{}};
 }
 function leererPlan(name='Neuer Markierungsplan'){return {name,platz:{L:44,B:24,belag:'kunststoff_rot'},fields:[],acks:{}};}
@@ -108,12 +108,24 @@ const listEl=$('#list');
 function renderList(){
   const fs=state.fields.slice().sort((a,b)=>a.prio-b.prio||a.name.localeCompare(b.name,'de')),W=getWarnings();
   listEl.innerHTML=fs.map(f=>{const ws=W.filter(w=>w.fid===f.id&&w.level!=='hinweis'&&!state.acks[w.key]),hi=ws.filter(w=>w.level==='hoch').length;
-    return `<div class="lrow ${f.id===sel?'sel':''} ${f.hidden?'dim':''}" data-id="${f.id}"><span class="prio ${f.prio===1?'p1':''}" title="Priorität">${f.prio}</span><span class="sw" style="background:${COLOR[f.color].hex}"></span><span class="lname">${esc(f.name)}</span>${ws.length?`<span class="wb ${hi?'':'w'}" title="offene Warnungen">${ws.length}</span>`:''}<button class="ib" data-act="vis" title="Ein-/ausblenden">${f.hidden?ICON.eyeOff:ICON.eye}</button></div>`;}).join('')||'<p class="muted small">Noch keine Felder. Oben Sportart wählen und auf den Platz setzen.</p>';
+    return `<div class="lrow ${f.id===sel?'sel':''} ${f.hidden?'dim':''}" data-id="${f.id}" data-prio="${f.prio}"><span class="grip nur-pc" title="Nach oben oder unten ziehen = Priorität ändern">${ICON.grip}</span><span class="prio ${f.prio===1?'p1':''}" title="Priorität">${f.prio}</span><span class="sw" style="background:${COLOR[f.color].hex}"></span><span class="lname">${esc(f.name)}</span>${ws.length?`<span class="wb ${hi?'':'w'}" title="offene Warnungen">${ws.length}</span>`:''}<button class="ib" data-act="vis" title="Ein-/ausblenden">${f.hidden?ICON.eyeOff:ICON.eye}</button></div>`;}).join('')||'<p class="muted small">Noch keine Felder. Oben Sportart wählen und auf den Platz setzen.</p>';
 }
 const ICON={
   eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   eyeOff:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 4.2-1"/></svg>',
+  grip:'<svg viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg>',
 };
+// Neue Prioritäten, wenn Feld id beim Ziehen am Ziel z landet: z.art 'auf' = gleiche Priorität wie z.row,
+// 'vor'/'nach' = eigene Priorität davor/danach. Danach ohne Lücken 1, 2, 3 …
+function prioNeu(id,z){
+  const f=byId(id),gr=[];
+  for(const x of state.fields.slice().sort((a,b)=>a.prio-b.prio||a.name.localeCompare(b.name,'de'))){if(x===f)continue;
+    const g=gr[gr.length-1];if(g&&g.p===x.prio)g.l.push(x);else gr.push({p:x.prio,l:[x]});}
+  const zi=gr.findIndex(g=>g.l.some(x=>x.id===z.row.dataset.id));
+  if(zi<0)return null;
+  if(z.art==='auf')gr[zi].l.push(f);else gr.splice(z.art==='vor'?zi:zi+1,0,{l:[f]});
+  const m=new Map();gr.forEach((g,i)=>g.l.forEach(x=>m.set(x.id,Math.min(i+1,PRIO_MAX))));return m;
+}
 function optInput(d,v){
   if(d.t==='bool')return `<label class="chk full"><input type="checkbox" data-o="${d.k}" ${v?'checked':''}> ${esc(d.l)}</label>`;
   let inp;
@@ -140,7 +152,7 @@ function renderProps(){
   h+=`<div class="g3"><label class="fld"><span>X <em>(m)</em></span><input type="number" data-f="x" step="0.01" value="${+f.x.toFixed(3)}"></label><label class="fld"><span>Y <em>(m)</em></span><input type="number" data-f="y" step="0.01" value="${+f.y.toFixed(3)}"></label><label class="fld"><span>Drehung <em>(°)</em></span><input type="number" data-f="rot" step="1" value="${+(+f.rot).toFixed(2)}"></label></div>
   <div class="small muted" style="margin:-4px 0 6px">Bezugspunkt: Feldmitte, ab Platzecke oben links</div>
   <div class="btnrow"><button class="btn sm" data-a="rotL">⟲ 90°</button><button class="btn sm" data-a="rotR">⟳ 90°</button><button class="btn sm" data-a="center">Auf Platz zentrieren</button><button class="btn sm" data-a="dup">Duplizieren</button><button class="btn sm danger" data-a="del">Löschen</button></div>
-  <div class="g2"><label class="fld"><span>Priorität <em>(1 = Hauptfeld)</em></span><input type="number" data-f="prio" min="1" max="9" step="1" value="${f.prio}"></label><label class="fld"><span>Linienbreite <em>(cm)</em></span><input type="number" data-f="lwcm" min="2" max="20" step="1" value="${num(f.lw*100)}"></label></div>
+  <div class="g2"><label class="fld"><span>Priorität <em>(1 = Hauptfeld)</em></span><input type="number" data-f="prio" min="1" max="${PRIO_MAX}" step="1" value="${f.prio}"></label><label class="fld"><span>Linienbreite <em>(cm)</em></span><input type="number" data-f="lwcm" min="2" max="20" step="1" value="${num(f.lw*100)}"></label></div>
   <div class="fld"><span>Linienfarbe <em>· BASPO: ${esc(N.farbeEmpf)}</em></span><div class="swatches">${COLORS.map(c=>`<button class="swb ${c.id===f.color?'on':''}" data-color="${c.id}" title="${c.name}" style="background:${c.hex}"></button>`).join('')}</div></div>`;
   const vopts=(N.opts||[]).filter(d=>!d.if||d.if(f.opt,f));
   if(vopts.length)h+=`<h4>Optionen</h4><div class="g2">${vopts.map(d=>optInput(d,f.opt[d.k])).join('')}</div>`;
@@ -249,7 +261,51 @@ function bind(){
   $('#zFit').addEventListener('click',fitView);
   window.addEventListener('resize',requestRender);
 
-  listEl.addEventListener('click',e=>{const row=e.target.closest('.lrow');if(!row)return;const f=byId(row.dataset.id);if(!f)return;
+  /* Feldliste: Zeile nach oben oder unten ziehen = Priorität ändern.
+     Maus: ganze Zeile, Touch und Stift: am Griff (sonst scrollt die Liste). Nicht auf dem Handy. */
+  let ld=null,nachZiehen=false;
+  const scrollBox=()=>{const a=listEl.closest('aside');return a&&a.scrollHeight>a.clientHeight+1?a:document.scrollingElement;};
+  function listZiel(y){
+    const o=ld.row.getBoundingClientRect();if(y>=o.top-ld.dy&&y<=o.bottom-ld.dy)return null;   // eigener Platz
+    const rows=[...listEl.querySelectorAll('.lrow')].filter(r=>r!==ld.row);if(!rows.length)return null;
+    let i=rows.length-1,art='nach';
+    for(let k=0;k<rows.length;k++){const b=rows[k].getBoundingClientRect();
+      if(y<b.top){i=k;art='vor';break;}
+      if(y<=b.bottom){const q=(y-b.top)/b.height;i=k;art=q<0.25?'vor':q>0.75?'nach':'auf';break;}}
+    // Zwischen zwei Zeilen gleicher Priorität = gleiche Priorität
+    const p=rows[i].dataset.prio;
+    if(art==='vor'&&i>0&&rows[i-1].dataset.prio===p)art='auf';
+    if(art==='nach'&&i<rows.length-1&&rows[i+1].dataset.prio===p)art='auf';
+    return {art,row:rows[i]};
+  }
+  function zielZeigen(z){ld.ziel=z;const m=z?prioNeu(ld.id,z):null;
+    for(const r of listEl.querySelectorAll('.lrow')){r.classList.remove('drop-vor','drop-nach','drop-auf');
+      const p=m?m.get(r.dataset.id):+r.dataset.prio,b=r.querySelector('.prio');b.textContent=p;b.classList.toggle('p1',p===1);}
+    if(z)z.row.classList.add('drop-'+z.art);}
+  function listEnde(e,abbruch){if(!ld||(e&&e.pointerId!==ld.pid))return;const d=ld;ld=null;
+    if(!d.an)return;   // nur angeklickt
+    nachZiehen=true;listEl.classList.remove('ziehen');
+    const m=!abbruch&&d.ziel?prioNeu(d.id,d.ziel):null;
+    if(m&&state.fields.some(f=>m.get(f.id)!==f.prio)){for(const f of state.fields)f.prio=m.get(f.id);sel=d.id;commit();renderProps();return;}
+    renderList();}
+  listEl.addEventListener('pointerdown',e=>{nachZiehen=false;if(nurAnsicht()||e.button!==0||(ld&&ld.an))return;ld=null;
+    const row=e.target.closest('.lrow');if(!row||e.target.closest('[data-act]'))return;
+    const griff=!!e.target.closest('.grip');if(e.pointerType!=='mouse'&&!griff)return;
+    if(griff)e.preventDefault();
+    const sc=scrollBox();ld={id:row.dataset.id,row,pid:e.pointerId,sy:e.clientY,sc,st0:sc.scrollTop,dy:0,an:false,ziel:null};});
+  listEl.addEventListener('pointermove',e=>{if(!ld||e.pointerId!==ld.pid)return;
+    if(!ld.an){if(!(e.buttons&1)){ld=null;return;}   // ausserhalb losgelassen
+      if(Math.abs(e.clientY-ld.sy)<5)return;ld.an=true;try{listEl.setPointerCapture(e.pointerId);}catch(_){}
+      listEl.classList.add('ziehen');ld.row.classList.add('gezogen');}
+    // am Rand mitscrollen
+    const sc=ld.sc,r=sc===document.scrollingElement?{top:0,bottom:innerHeight}:sc.getBoundingClientRect();
+    if(e.clientY<r.top+30)sc.scrollTop-=8;else if(e.clientY>r.bottom-30)sc.scrollTop+=8;
+    ld.dy=e.clientY-ld.sy+(sc.scrollTop-ld.st0);ld.row.style.transform=`translate(20px,${ld.dy}px)`;   // leicht seitlich, damit das Ziel sichtbar bleibt
+    zielZeigen(listZiel(e.clientY));});
+  listEl.addEventListener('pointerup',e=>listEnde(e,false));
+  listEl.addEventListener('pointercancel',e=>listEnde(e,true));
+  listEl.addEventListener('lostpointercapture',e=>listEnde(e,true));
+  listEl.addEventListener('click',e=>{if(nachZiehen){nachZiehen=false;return;}const row=e.target.closest('.lrow');if(!row)return;const f=byId(row.dataset.id);if(!f)return;
     if(e.target.closest('[data-act="vis"]')){if(nurAnsicht())return;f.hidden=!f.hidden;if(f.hidden&&sel===f.id)sel=null;commit();renderProps();return;}select(f.id);setTab('props');});
 
   const props=$('#tab-props');
@@ -257,7 +313,7 @@ function bind(){
     if(t.dataset.f){const k=t.dataset.f;if(k==='name'){f.name=t.value;renderList();requestRender();return;}if(k==='stufe')return;
       const v=parseFloat(t.value);if(!isFinite(v))return;
       if(k==='rot'){const a0=ankerWelt(f);f.rot=v;ankerHalten(f,a0);}
-      else if(k==='lwcm')f.lw=clamp(v,2,20)/100;else if(k==='prio')f.prio=clamp(Math.round(v),1,9);else if(k==='L'||k==='B')f[k]=clamp(v,1,200);else f[k]=v;
+      else if(k==='lwcm')f.lw=clamp(v,2,20)/100;else if(k==='prio')f.prio=clamp(Math.round(v),1,PRIO_MAX);else if(k==='L'||k==='B')f[k]=clamp(v,1,200);else f[k]=v;
       requestRender();updateInfo();return;}
     if(t.dataset.o){const d=NORM[f.sport].opts.find(o=>o.k===t.dataset.o);let v;
       if(d.t==='bool')v=t.checked;else{v=parseFloat(t.value);if(!isFinite(v))return;if(d.min!=null)v=Math.max(d.min,v);if(d.max!=null)v=Math.min(d.max,v);if(d.int)v=Math.round(v);}
@@ -329,6 +385,7 @@ function bind(){
 
   window.addEventListener('keydown',e=>{
     const tag=(e.target.tagName||'').toLowerCase(),typing=tag==='input'||tag==='textarea'||tag==='select';
+    if(e.key==='Escape'&&ld){listEnde(null,true);e.preventDefault();return;}   // Ziehen in der Feldliste abbrechen
     if(e.key===' '&&!typing){spaceDown=true;svg.style.cursor='grab';e.preventDefault();return;}
     if(typing||document.body.dataset.ansicht!=='plan')return;const mod=e.ctrlKey||e.metaKey,k=e.key.toLowerCase();
     if(nurAnsicht()){if(k==='f')fitView();if(e.key==='Escape')select(null);return;}

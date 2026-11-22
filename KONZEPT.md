@@ -36,7 +36,7 @@ Mitarbeitende erfassen Mängel und Schadstellen auf Sportplätzen mit Foto und g
 - **Weitsprung:** Nur der Anlauf muss auf dem Platz liegen; die Grube darf über den Platzrand hinaus (keine Meldung). Beim Ändern von Anlauf, Optionen und Drehung bleibt die Grube stehen.
 - **Volleyball-Netzpfosten** gelten als mobil: keine Warnung, wenn sie in einem anderen Feld oder dessen Sicherheitszone stehen. Feste Einbauteile (Korbmasten) werden weiter geprüft.
 - **Einrasten:** Beim Ziehen rasten Felder kurz am Platzrand, in der Platzmitte und an der Sicherheitszone ein, der Weitsprung zusätzlich mit den Grubenkanten. Schalter «Einrasten», Alt-Taste = ohne.
-- **Priorität pro Feld:** Linien des Hauptfelds laufen durch, untergeordnete Felder werden an Kreuzungen unterbrochen.
+- **Priorität pro Feld:** Linien des Hauptfelds laufen durch, untergeordnete Felder werden an Kreuzungen unterbrochen. Gleiche Priorität = Linien kreuzen sich ohne Unterbruch. Priorität 1 bis 20, festgelegt durch Ziehen in «Felder im Plan» (zwischen zwei Zeilen = eigene Priorität, auf eine Zeile = gleiche; danach ohne Lücken neu nummeriert) oder über das Zahlenfeld.
 - **Ausgabe:** Browserdruck / PDF mit Gesamtplan, Lagemassen, Detailblatt pro Feld zum Einmessen und Mengen; dazu DXF, SVG und CSV.
 - **Bedienung:** voll am PC und Tablet. Auf dem Handy nur ansehen (Plan, Warnungen, Mengen, Druck).
 - Pläne liegen in IndexedDB (Store `markierungsplaene`) und sind Teil der Sicherung (Format 3). Einzelne Pläne lassen sich zusätzlich als Datei speichern und öffnen.

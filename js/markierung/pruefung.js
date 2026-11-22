@@ -9,7 +9,8 @@ export const settings={grid:true,safety:true,dims:true,notes:true,gaps:true,thic
 
 let uidN=0;const newId=()=>'f'+Date.now().toString(36)+(uidN++).toString(36)+Math.random().toString(36).slice(2,5);
 function uniqueName(base){const s=new Set(state.fields.map(f=>f.name));if(!s.has(base))return base;let i=2;while(s.has(base+' '+i))i++;return base+' '+i;}
-function nextPrio(){return state.fields.length?Math.min(9,Math.max(...state.fields.map(f=>f.prio))+1):1;}
+const PRIO_MAX=20;   // höchste Prioritätszahl
+function nextPrio(){return state.fields.length?Math.min(PRIO_MAX,Math.max(...state.fields.map(f=>f.prio))+1):1;}
 function stufeOf(f){const N=NORM[f.sport];return N.stufen.find(s=>s.id===f.stufe)||N.stufen[0];}
 // Sicherheitszone: stirn = Stirnseite links (lokal x0), stirn2 = Stirnseite rechts (x1, z.B. 3x3 Endlinie), laengs = Längsseiten
 function szOf(f){const s=stufeOf(f).sz||{};return {stirn:s.stirn||0,laengs:s.laengs||0,stirn2:s.stirn2!=null?s.stirn2:(s.stirn||0)};}
@@ -182,4 +183,4 @@ function quantities(){
 function allPosts(){const out=[];for(const {f,w} of computeAll())w.posts.forEach(p=>out.push({f,label:p.label,x:p.x,y:p.y}));return out;}
 function safetyPoly(f){const b=geoLocal(f).outline,sz=szOf(f);return [[b.x0-sz.stirn,b.y0-sz.laengs],[b.x1+sz.stirn2,b.y0-sz.laengs],[b.x1+sz.stirn2,b.y1+sz.laengs],[b.x0-sz.stirn,b.y1+sz.laengs]].map(p=>toW(f,p[0],p[1]));}
 
-export { newId, uniqueName, nextPrio, stufeOf, szOf, szSeite, szText, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, stateKey, sides, LV, LVNAME, getWarnings, markName, quantities, allPosts, safetyPoly };
+export { PRIO_MAX, newId, uniqueName, nextPrio,stufeOf, szOf, szSeite, szText, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, stateKey, sides, LV, LVNAME, getWarnings, markName, quantities, allPosts, safetyPoly };
