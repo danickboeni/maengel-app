@@ -316,7 +316,8 @@ export function positionLoeschen(position) {
 }
 
 // ---------- Markierungspläne ----------
-// Ein Plan = { id, name, daten (ganzer Planerzustand), erstellt, geaendert }. Kein Bezug zu Plätzen oder Offerten.
+// Ein Plan = { id, name, daten (ganzer Planerzustand), unterlage (CAD-Linien, optional), erstellt, geaendert }.
+// Kein Bezug zu Plätzen oder Offerten.
 
 export function markierungsplanSpeichern(plan) {
   const jetzt = new Date().toISOString();
@@ -325,8 +326,12 @@ export function markierungsplanSpeichern(plan) {
   return transaktion(['markierungsplaene'], 'readwrite', (tx) => {
     const st = tx.objectStore('markierungsplaene');
     st.get(p.id).onsuccess = (ev) => {
+      const alt = ev.target.result;
       // Erstellungsdatum vom bestehenden Plan übernehmen
-      p.erstellt = (ev.target.result && ev.target.result.erstellt) || p.erstellt || jetzt;
+      p.erstellt = (alt && alt.erstellt) || p.erstellt || jetzt;
+      // CAD-Unterlage bleibt, wenn sie beim Speichern nicht mitgegeben wird (null = entfernen)
+      if (!('unterlage' in plan) && alt && alt.unterlage) p.unterlage = alt.unterlage;
+      if (p.unterlage === null) delete p.unterlage;
       st.put(p);
     };
   }).then(() => { aenderungMerken(); return p; });

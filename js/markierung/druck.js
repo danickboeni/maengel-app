@@ -1,9 +1,12 @@
 // Ausgabe: Mengenliste (CSV), DXF für CAD und Druck / PDF über den Browser.
 import { PI, TAU, deg, n4, f1, f2, num, esc, norm360, readRot } from './hilfen.js';
 import { COLOR, BELAG, NORM } from './normen.js';
-import { state, stufeOf, szOf, geoLocal, trig, toW, computeAll, getWarnings, quantities, allPosts, safetyPoly, LVNAME } from './pruefung.js';
+import { state, stufeOf, szOf, geoLocal, trig, toW, computeAll, getWarnings, quantities, allPosts, safetyPoly, LVNAME, hatRand, randPunkte } from './pruefung.js';
 import { planExtents, planSVG, dimsWorld, dimSVG, lageChains, fieldExtents } from './zeichnen.js';
 const $=s=>document.querySelector(s);
+// CAD-Unterlage für den Druck: der Planer meldet eine Funktion (Strichstärke in m → SVG), sonst keine
+let unterlageDruck=null;
+export function setUnterlageDruck(fn){unterlageDruck=fn;}
 
 function csvCell(v){const s=String(v);return /[;"\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
 function buildCSV(){
@@ -24,7 +27,7 @@ function buildDXF(){
   const ARC=(ly,aci,cx,cy,r,a0,a1)=>{if(a1-a0>=TAU-1e-6)return ent('CIRCLE',ly,aci,[[10,cx],[20,B-cy],[30,0],[40,r]]);ent('ARC',ly,aci,[[10,cx],[20,B-cy],[30,0],[40,r],[50,norm360(-deg(a1))],[51,norm360(-deg(a0))]]);};
   const TEXT=(ly,aci,p,h,s,rot=0)=>ent('TEXT',ly,aci,[[10,p.x],[20,B-p.y],[30,0],[40,h],[1,translit(s)],[50,norm360(-rot)],[72,1],[11,p.x],[21,B-p.y],[31,0],[73,2]]);
   P(0,'SECTION');P(2,'ENTITIES');
-  const L=state.platz.L,c=[{x:0,y:0},{x:L,y:0},{x:L,y:B},{x:0,y:B}];for(let i=0;i<4;i++)LINE('PLATZ',8,c[i],c[(i+1)%4]);
+  const c=randPunkte().map(([x,y])=>({x,y}));for(let i=0;i<c.length;i++)LINE('PLATZ',8,c[i],c[(i+1)%c.length]);
   for(const {f,w} of computeAll()){
     const ly=(col,wd)=>`MARK_${layerName(COLOR[col].name)}_${Math.round(wd*100)}CM`;
     w.lines.forEach(l=>LINE(ly(l.c,l.w),COLOR[l.c].aci,{x:l.x1,y:l.y1},{x:l.x2,y:l.y2}));
@@ -44,7 +47,7 @@ function buildDXF(){
 
 const PAPER={A4L:[297,210,'A4 quer'],A4P:[210,297,'A4 hoch'],A3L:[420,297,'A3 quer'],A3P:[297,420,'A3 hoch']};
 const SCALES=[50,100,125,200,250,500,1000,2000];
-function printOpts(){return {title:$('#prTitle').value||state.name,paper:$('#prPaper').value,scale:$('#prScale').value,thick:$('#prThick').checked,safety:$('#prSafety').checked,warn:$('#prWarn').checked,qty:$('#prQty').checked,lage:$('#prLage').checked,detail:$('#prDetail').checked};}
+function printOpts(){return {title:$('#prTitle').value||state.name,paper:$('#prPaper').value,scale:$('#prScale').value,thick:$('#prThick').checked,safety:$('#prSafety').checked,warn:$('#prWarn').checked,qty:$('#prQty').checked,lage:$('#prLage').checked,detail:$('#prDetail').checked,unterlage:!!unterlageDruck&&$('#prUnterlage').checked};}
 const pickScale=(ext,aw,ah,opt)=>{const need=Math.max((ext.x1-ext.x0)*1000/aw,(ext.y1-ext.y0)*1000/ah);return {need,scale:opt==='fit'?(SCALES.find(s=>s>=need)||Math.ceil(need/1000)*1000):+opt};};
 const centerView=(ext,aw,ah,sc)=>{const cx=(ext.x0+ext.x1)/2,cy=(ext.y0+ext.y1)/2,ww=aw*sc/1000,wh=ah*sc/1000;return {x0:cx-ww/2,y0:cy-wh/2,x1:cx+ww/2,y1:cy+wh/2};};
 const unionBox=(a,b)=>({x0:Math.min(a.x0,b.x0),y0:Math.min(a.y0,b.y0),x1:Math.max(a.x1,b.x1),y1:Math.max(a.y1,b.y1)});
@@ -90,7 +93,8 @@ function doPrint(o){
 }
 function buildPrint(o){
   const Ly=printLayout(o),sc=Ly.scale,q=quantities(),W=getWarnings(),pts=allPosts();
-  const svgPlan=planSVG(Ly.view,{minW:o.thick?0.2*sc/1000:0,gw:0.15*sc/1000,safety:o.safety,notes:true,extra:Ly.chains?Ly.chains.svg:''},`${Ly.aw}mm`,`${Ly.ah}mm`);
+  const uS=o.unterlage&&unterlageDruck?unterlageDruck(0.15*sc/1000):'';
+  const svgPlan=planSVG(Ly.view,{minW:o.thick?0.2*sc/1000:0,gw:0.15*sc/1000,safety:o.safety,notes:true,unterlage:uS,extra:Ly.chains?Ly.chains.svg:''},`${Ly.aw}mm`,`${Ly.ah}mm`);
   const sb=scaleBarSVG(sc);
   const schraeg=Ly.chains&&Ly.chains.schraeg.length?` · Ohne Massketten (schräg gedreht, siehe Detailblatt): ${Ly.chains.schraeg.map(f=>esc(f.name)).join(', ')}`:'';
   const used=[...new Set(computeAll().map(a=>a.f))].sort((a,b)=>a.prio-b.prio);
@@ -98,7 +102,7 @@ function buildPrint(o){
   const date=new Date().toLocaleDateString('de-CH');
   const wl=W.filter(w=>w.level!=='hinweis'||state.acks[w.key]!=null);
   const warnBox=o.warn?`<div style="height:${Ly.foot-2}mm;overflow:hidden;margin-top:2mm;font-size:7.5pt;columns:2;column-gap:6mm">${wl.length?wl.map(w=>`<div style="break-inside:avoid;margin-bottom:.8mm"><b>${LVNAME[w.level]}${state.acks[w.key]!=null?' – bestätigt':''}:</b> ${esc(w.text)}${state.acks[w.key]?` <i>(${esc(state.acks[w.key])})</i>`:''}</div>`).join(''):'Keine Warnungen.'}</div>`:'';
-  let html=`<div class="pp-page" style="width:${Ly.aw}mm;height:${Ly.ph-2*Ly.m-1}mm"><div class="pp-head"><div><div class="pp-title">${esc(o.title)}</div><div class="pp-sub">Markierungsplan · Platz ${f2(state.platz.L)} × ${f2(state.platz.B)} m, ${esc(BELAG[state.platz.belag].name)} · ${date}${Ly.chains?' · Massketten: Lage der Felder ab Platzrand (Feldaussenkante), Masse in m':''}${schraeg}</div></div><div class="pp-legend">${legend}</div><div class="pp-scale">Massstab 1:${sc} (${Ly.pname})<br>${sb}</div></div><div class="pp-plan" style="width:${Ly.aw}mm;height:${Ly.ah}mm">${svgPlan}</div>${warnBox}</div>`;
+  let html=`<div class="pp-page" style="width:${Ly.aw}mm;height:${Ly.ph-2*Ly.m-1}mm"><div class="pp-head"><div><div class="pp-title">${esc(o.title)}</div><div class="pp-sub">Markierungsplan · Platz ${f2(state.platz.L)} × ${f2(state.platz.B)} m, ${esc(BELAG[state.platz.belag].name)} · ${date}${Ly.chains?(hatRand()?' · Massketten: Lage der Felder ab Bezugsrechteck um den Platzrand (gestrichelt, Feldaussenkante), Masse in m':' · Massketten: Lage der Felder ab Platzrand (Feldaussenkante), Masse in m'):''}${schraeg}</div></div><div class="pp-legend">${legend}</div><div class="pp-scale">Massstab 1:${sc} (${Ly.pname})<br>${sb}</div></div><div class="pp-plan" style="width:${Ly.aw}mm;height:${Ly.ah}mm">${svgPlan}</div>${warnBox}</div>`;
   if(o.detail){const fs=computeAll().map(a=>a.f).sort((a,b)=>a.prio-b.prio||a.name.localeCompare(b.name,'de'));fs.forEach((f,i)=>{html+=detailPageHTML(f,i,fs.length,o,Ly,date);});}
   if(o.qty){html+=`<div class="pp-page" style="width:${Ly.aw}mm"><h2>Mengen</h2><table class="pp-table"><thead><tr><th>Linienfarbe</th><th class="r">Breite</th><th class="r">Länge</th><th class="r">Fläche</th></tr></thead><tbody>${q.lines.map(l=>`<tr><td>${COLOR[l.c].name}</td><td class="r">${num(l.w*100)} cm</td><td class="r">${f1(l.len)} m</td><td class="r">${f2(l.len*l.w)} m²</td></tr>`).join('')}<tr><td><b>Total</b></td><td></td><td class="r"><b>${f1(q.tot)} m</b></td><td class="r"><b>${f2(q.totA)} m²</b></td></tr></tbody></table>
     ${q.marks.length?`<table class="pp-table"><thead><tr><th>Zeichen</th><th>Farbe</th><th class="r">Anzahl</th></tr></thead><tbody>${q.marks.map(m=>`<tr><td>${esc(m.name)}</td><td>${COLOR[m.c].name}</td><td class="r">${m.n}</td></tr>`).join('')}</tbody></table>`:''}

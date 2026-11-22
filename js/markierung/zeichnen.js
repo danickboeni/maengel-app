@@ -1,7 +1,7 @@
 // SVG-Ausgabe des Plans (Bildschirm und Druck) und Bemassung für den Markierer.
 import { PI, TAU, deg, n4, num, esc, norm360, readRot, fmtM } from './hilfen.js';
 import { COLOR, BELAG, NORM, bboxOf } from './normen.js';
-import { state, geoLocal, trig, toW, computeAll, getWarnings, szOf, safetyPoly } from './pruefung.js';
+import { state, geoLocal, trig, toW, computeAll, getWarnings, szOf, safetyPoly, hatRand, randPunkte } from './pruefung.js';
 
 function trAttr(f){return `translate(${n4(f.x)} ${n4(f.y)}) rotate(${n4(f.rot||0)})`;}
 function arcD(cx,cy,r,a0,a1,move=true){
@@ -45,10 +45,18 @@ function digitsSVG(w){
   return w.digits.map(d=>`<text x="${n4(d.x)}" y="${n4(d.y)}" font-size="${n4(d.size*1.35)}" font-weight="700" font-family="Arial,Helvetica,sans-serif" text-anchor="middle" dominant-baseline="central" fill="${COLOR[d.c].hex}"${d.ang?` transform="rotate(${n4(d.ang)} ${n4(d.x)} ${n4(d.y)})"`:''}>${esc(d.t)}</text>`).join('');
 }
 function postSVG(p,o){const r=0.16;return `<circle cx="${n4(p.x)}" cy="${n4(p.y)}" r="${n4(r)}" fill="#111" ${o.screen?'stroke="#fff" stroke-width="1.2" vector-effect="non-scaling-stroke"':`stroke="#fff" stroke-width="${n4(o.gw)}"`}/><path d="M${n4(p.x-r)} ${n4(p.y)}H${n4(p.x+r)}M${n4(p.x)} ${n4(p.y-r)}V${n4(p.y+r)}" stroke="#fff" ${o.screen?'stroke-width="1" vector-effect="non-scaling-stroke"':`stroke-width="${n4(o.gw)}"`}/>`;}
+const randPts=()=>randPunkte().map(([x,y])=>n4(x)+','+n4(y)).join(' ');
+// Belag und Raster (beim Vieleck-Rand auf den Platz beschnitten)
+function grundSVG(o){
+  const P=state.platz;let s=hatRand()?`<polygon points="${randPts()}" fill="${BELAG[P.belag].hex}"/>`:`<rect x="0" y="0" width="${n4(P.L)}" height="${n4(P.B)}" fill="${BELAG[P.belag].hex}"/>`;
+  if(o.gridSvg)s+=hatRand()?`<clipPath id="platzClip${o.screen?'S':'P'}"><polygon points="${randPts()}"/></clipPath><g clip-path="url(#platzClip${o.screen?'S':'P'})">${o.gridSvg}</g>`:o.gridSvg;
+  return s;
+}
+// o.grund===false: ohne Belag und Raster (Bildschirm zeichnet sie getrennt); o.unterlage: SVG der CAD-Unterlage
 function contentSVG(o){
-  const P=state.platz,all=computeAll().filter(a=>!o.only||a.f.id===o.only),warns=getWarnings();let s='';
-  s+=`<rect x="0" y="0" width="${n4(P.L)}" height="${n4(P.B)}" fill="${BELAG[P.belag].hex}"/>`;
-  if(o.gridSvg)s+=o.gridSvg;
+  const all=computeAll().filter(a=>!o.only||a.f.id===o.only),warns=getWarnings();let s='';
+  if(o.grund!==false)s+=grundSVG(o);
+  if(o.unterlage)s+=o.unterlage;
   if(o.safety)for(const {f} of all){const sz=szOf(f);if(!(sz.stirn>0||sz.stirn2>0||sz.laengs>0))continue;
     const bad=warns.some(w=>w.fid===f.id&&w.level==='hoch'&&!state.acks[w.key]);
     s+=`<polygon points="${safetyPoly(f).map(p=>n4(p.x)+','+n4(p.y)).join(' ')}" fill="${o.screen&&f.id===o.sel?'rgba(255,255,255,.07)':'none'}" ${strokeAttr(o,bad?'#ff5c5c':o.szcol,o.screen?'7 4':true)}/>`;}
@@ -63,7 +71,8 @@ function contentSVG(o){
     const la=geoLocal(f).labelAt;if(la){const p=toW(f,la.x,la.y);s+=textSVG(p.x,p.y,f.name,0.75,readRot(f.rot),o);}}
   return s;
 }
-function platzOutline(o){const P=state.platz;return `<rect x="0" y="0" width="${n4(P.L)}" height="${n4(P.B)}" fill="none" ${o.screen?'stroke="rgba(0,0,0,.55)" stroke-width="1.5" vector-effect="non-scaling-stroke"':`stroke="#000" stroke-width="${n4(o.gw*1.5)}"`}/>`;}
+function platzOutline(o){const P=state.platz,st=o.screen?'stroke="rgba(0,0,0,.55)" stroke-width="1.5" vector-effect="non-scaling-stroke"':`stroke="#000" stroke-width="${n4(o.gw*1.5)}"`;
+  return hatRand()?`<polygon points="${randPts()}" fill="none" stroke-linejoin="round" ${st}/>`:`<rect x="0" y="0" width="${n4(P.L)}" height="${n4(P.B)}" fill="none" ${st}/>`;}
 
 function planExtents(withSafety,margin){
   const P=state.platz,b={x0:0,y0:0,x1:P.L,y1:P.B};
@@ -72,7 +81,7 @@ function planExtents(withSafety,margin){
 }
 function planSVG(ext,o,wAttr,hAttr){
   const w=ext.x1-ext.x0,h=ext.y1-ext.y0;
-  const oo={screen:false,minW:o.minW,gw:o.gw,grid:false,safety:o.safety,notes:o.notes,only:o.only,gcol:'rgba(255,255,255,.85)',szcol:'rgba(255,255,255,.75)'};
+  const oo={screen:false,minW:o.minW,gw:o.gw,grid:false,safety:o.safety,notes:o.notes,only:o.only,unterlage:o.unterlage,gcol:'rgba(255,255,255,.85)',szcol:'rgba(255,255,255,.75)'};
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${n4(ext.x0)} ${n4(ext.y0)} ${n4(w)} ${n4(h)}" width="${wAttr}" height="${hAttr}"><rect x="${n4(ext.x0)}" y="${n4(ext.y0)}" width="${n4(w)}" height="${n4(h)}" fill="${o.bg||'#7d8a78'}"/>${contentSVG(oo)}${platzOutline(oo)}${o.extra||''}</svg>`;
 }
 
@@ -107,6 +116,8 @@ function lageChains(o){
     const b=geoLocal(f).outline,p=toW(f,b.x0,b.y0),q=toW(f,b.x1,b.y1);
     rows.push({name:f.name,x:[0,P.L,Math.min(p.x,q.x),Math.max(p.x,q.x)],y:[0,P.B,Math.min(p.y,q.y),Math.max(p.y,q.y)]});}
   const top=Math.min(0,o.top),left=Math.min(0,o.left);let s='',maxLab=0;
+  // Vieleck-Rand: Masse ab dem umschliessenden Rechteck (Bezugslinien, gestrichelt)
+  if(hatRand())s+=`<rect x="0" y="0" width="${n4(P.L)}" height="${n4(P.B)}" fill="none" stroke="#111" stroke-width="${n4(o.dw)}" stroke-dasharray="${n4(o.dt)} ${n4(o.dt*0.6)}"/>`;
   rows.forEach((r,k)=>{
     const xs=[...new Set(r.x.map(v=>Math.round(v*1000)/1000))].sort((a,b)=>a-b),ys=[...new Set(r.y.map(v=>Math.round(v*1000)/1000))].sort((a,b)=>a-b);
     const yr=top-o.dt*1.2-rowH*k,xr=left-o.dt*1.2-rowH*k;
@@ -131,4 +142,4 @@ function fieldExtents(f,dt){
   return b;
 }
 
-export { trAttr, arcD, textSVG, contentSVG, platzOutline, planExtents, planSVG, dimsWorld, dimSVG, lageChains, fieldExtents };
+export { trAttr, arcD, textSVG, grundSVG, contentSVG,platzOutline, planExtents, planSVG, dimsWorld, dimSVG, lageChains, fieldExtents };

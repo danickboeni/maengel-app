@@ -2,9 +2,10 @@
 import * as db from '../db.js';
 import { PI, TAU, rad, deg, clamp, n4, f1, f2, num, esc, norm360, readRot } from './hilfen.js';
 import { COLORS, COLOR, BELAEGE, BELAG, NORM } from './normen.js';
-import { state, setState, settings, PRIO_MAX, newId,uniqueName, stufeOf, szOf, szSeite, szText, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, sides, LVNAME, getWarnings, quantities, allPosts } from './pruefung.js';
-import { contentSVG, platzOutline, planExtents, planSVG } from './zeichnen.js';
-import { csvCell, buildCSV, buildDXF, printOpts, updatePrintInfo, buildPrint, doPrint } from './druck.js';
+import { state, setState, settings, PRIO_MAX, newId,uniqueName, stufeOf, szOf, szSeite, szText, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, sides, LVNAME, getWarnings, quantities, allPosts, hatRand } from './pruefung.js';
+import { grundSVG, contentSVG, platzOutline, planExtents, planSVG } from './zeichnen.js';
+import { csvCell, buildCSV, buildDXF, printOpts, updatePrintInfo, buildPrint, doPrint, setUnterlageDruck } from './druck.js';
+import { EINHEITEN, dxfText, dxfLesen, geoGueltig, unterlageSVG, zeichnungsGroesse, zuWelt, naechsteKante, naechsterPunkt, zugPunkte, geschlossenerZug } from './unterlage.js';
 const $=s=>document.querySelector(s);
 
 /* ================= Zustand ================= */
@@ -14,12 +15,14 @@ const view={s:10,tx:0,ty:0};
 let sel=null,drag=null,spaceDown=false,activeTab='props',ackEdit=null;
 let fangLinien=[];          // Hilfslinien beim Einrasten während des Ziehens
 let planId=null;            // id des offenen Plans in der Datenbank
+let uGeo=null;              // Linien der CAD-Unterlage (nicht im Verlauf, separat gespeichert); Lage in state.unterlage
+let modus=null,modusHover=null;   // Klick-Modus für die Unterlage: 'kante' | 'punkt' | 'rand'
 const getSel=()=>sel?byId(sel)||null:null;
 // Handy (schmaler Bildschirm): nur ansehen, Warnungen prüfen, PDF – bearbeiten am PC oder Tablet
 const handyAbfrage=matchMedia('(max-width: 699px)');
 const nurAnsicht=()=>handyAbfrage.matches;
 
-const svg=$('#svg'),vp=$('#vp'),contentG=$('#content'),overlayG=$('#overlay');
+const svg=$('#svg'),vp=$('#vp'),grundG=$('#grund'),unterG=$('#unterlage'),contentG=$('#content'),overlayG=$('#overlay');
 function gridSVG(){
   const P=state.platz,steps=[[0.5,1],[1,5],[5,10],[10,50],[50,100]];
   const [mi,ma]=steps.find(([m])=>m*view.s>=12)||steps[steps.length-1],k=Math.round(ma/mi);let a='',b='';
@@ -30,15 +33,24 @@ function gridSVG(){
 let rq=0;function requestRender(){if(!rq)rq=requestAnimationFrame(()=>{rq=0;render();});}
 function render(){
   vp.setAttribute('transform',`matrix(${view.s} 0 0 ${view.s} ${view.tx} ${view.ty})`);
-  contentG.innerHTML=contentSVG({screen:true,minW:settings.thick?1.3/view.s:0,gridSvg:settings.grid?gridSVG():'',sel,safety:settings.safety,notes:settings.notes,gcol:'rgba(255,255,255,.75)',szcol:'rgba(255,255,255,.55)'})+platzOutline({screen:true});
+  grundG.innerHTML=grundSVG({screen:true,gridSvg:settings.grid?gridSVG():''});
+  unterlageZeichnen();
+  contentG.innerHTML=contentSVG({screen:true,grund:false,minW:settings.thick?1.3/view.s:0,sel,safety:settings.safety,notes:settings.notes,gcol:'rgba(255,255,255,.75)',szcol:'rgba(255,255,255,.55)'})+platzOutline({screen:true});
   renderOverlay();updateScaleBar();updateWarnCount();
+}
+// Unterlage nur neu aufbauen, wenn sich Linien, Einheit, Ebenen oder Lage ändern
+let uZeichnung={geo:null,key:''};
+function unterlageZeichnen(){
+  const U=state.unterlage,an=!!(U&&uGeo&&U.sicht!==false),key=an?JSON.stringify([U.einheit,U.aus,U.rot,U.tx,U.ty]):'';
+  if(uZeichnung.geo===uGeo&&uZeichnung.key===key)return;
+  uZeichnung={geo:uGeo,key};unterG.innerHTML=an?unterlageSVG(uGeo,U,{screen:true}):'';
 }
 function screenText(x,y,t,px=12,fill='#fff',anchor='middle',rot=0){const fs=px/view.s;return `<text x="${n4(x)}" y="${n4(y)}" font-size="${n4(fs)}" text-anchor="${anchor}" dominant-baseline="central" class="otext" fill="${fill}" stroke-width="${n4(fs*0.28)}"${rot?` transform="rotate(${n4(rot)} ${n4(x)} ${n4(y)})"`:''}>${esc(t)}</text>`;}
 function handlePos(f){const b=geoLocal(f).outline,[c,s]=trig(f),top=toW(f,(b.x0+b.x1)/2,b.y0),off=28/view.s;return {x:top.x+s*off,y:top.y-c*off,top};}
 function renderOverlay(){
   const P=state.platz;let h='';
   h+=screenText(P.L/2,-16/view.s,`${f2(P.L)} m`,12)+screenText(-16/view.s,P.B/2,`${f2(P.B)} m`,12,'#fff','middle',-90);
-  const f=getSel();
+  const f=modus?null:getSel();
   if(f&&!f.hidden){
     const b=geoLocal(f).outline,pts=[[b.x0,b.y0],[b.x1,b.y0],[b.x1,b.y1],[b.x0,b.y1]].map(p=>toW(f,p[0],p[1]));
     h+=`<polygon points="${pts.map(p=>n4(p.x)+','+n4(p.y)).join(' ')}" class="selbox"/>`;
@@ -57,10 +69,21 @@ function renderOverlay(){
     if(l.ax==='x')h+=`<line x1="${n4(l.v)}" y1="${n4(-ue)}" x2="${n4(l.v)}" y2="${n4(P.B+ue)}" class="fang"/>`+screenText(l.v+6/view.s,ff?ff.y:P.B/2,l.t,11,'#8fd6ff','start');
     else h+=`<line x1="${n4(-ue)}" y1="${n4(l.v)}" x2="${n4(P.L+ue)}" y2="${n4(l.v)}" class="fang"/>`+screenText(ff?ff.x:P.L/2,l.v-9/view.s,l.t,11,'#8fd6ff');
   }
+  // Unterlage: getroffene Kante, Punkt oder Linie hervorheben
+  const mh=modus&&modusHover;
+  if(mh&&modus==='kante')h+=`<line x1="${n4(mh.a.x)}" y1="${n4(mh.a.y)}" x2="${n4(mh.b.x)}" y2="${n4(mh.b.y)}" class="uhl"/>`;
+  if(mh&&modus==='punkt')h+=`<circle cx="${n4(mh.x)}" cy="${n4(mh.y)}" r="${n4(6/view.s)}" class="uhlp"/>`;
+  if(mh&&modus==='rand')h+=`<${mh.zu?'polygon':'polyline'} points="${mh.pts.map(p=>n4(p.x)+','+n4(p.y)).join(' ')}" class="uhl"/>`;
   overlayG.innerHTML=h;
 }
 function updateScaleBar(){const c=[0.5,1,2,5,10,20,50,100,200].find(v=>v*view.s>=70)||200;const el=$('#scalebar');el.querySelector('.bar').style.width=(c*view.s)+'px';el.querySelector('span').textContent=num(c)+' m';}
-function fitView(){const r=svg.getBoundingClientRect();if(!r.width)return;const P=state.platz,pad=46;view.s=clamp(Math.min((r.width-2*pad)/P.L,(r.height-2*pad)/P.B),0.3,600);view.tx=r.width/2-P.L/2*view.s;view.ty=r.height/2-P.B/2*view.s;requestRender();}
+function fitView(){const P=state.platz;fitBox({x0:0,y0:0,x1:P.L,y1:P.B});}
+function fitBox(b){const r=svg.getBoundingClientRect();if(!r.width)return;const pad=46,w=Math.max(b.x1-b.x0,1),h=Math.max(b.y1-b.y0,1);
+  view.s=clamp(Math.min((r.width-2*pad)/w,(r.height-2*pad)/h),0.3,600);view.tx=r.width/2-(b.x0+b.x1)/2*view.s;view.ty=r.height/2-(b.y0+b.y1)/2*view.s;requestRender();}
+// Platz und ganze Unterlage zeigen
+function fitUnterlage(){const P=state.platz,U=state.unterlage,b={x0:0,y0:0,x1:P.L,y1:P.B};
+  if(U&&uGeo){const g=zeichnungsGroesse(uGeo,U.einheit);for(const [x,y] of [[0,0],[g.w,0],[g.w,g.h],[0,g.h]]){const p=zuWelt(U,x,y);b.x0=Math.min(b.x0,p.x);b.y0=Math.min(b.y0,p.y);b.x1=Math.max(b.x1,p.x);b.y1=Math.max(b.y1,p.y);}}
+  fitBox(b);}
 function zoomAt(px,py,k){const s=clamp(view.s*k,0.3,600),wx=(px-view.tx)/view.s,wy=(py-view.ty)/view.s;view.s=s;view.tx=px-wx*s;view.ty=py-wy*s;requestRender();}
 
 /* ================= Verlauf, Speichern ================= */
@@ -74,10 +97,10 @@ async function speichernJetzt(){clearTimeout(speicherTimer);if(!planId||!state)r
   catch(e){meldung('Speichern fehlgeschlagen: '+(e&&e.message||e));}}
 function commit(){const s=snapshot();if(hist[hi]!==s){hist=hist.slice(0,hi+1);hist.push(s);if(hist.length>200)hist.shift();hi=hist.length-1;speichernPlanen();}
   afterChange();}
-function restore(s){setState(JSON.parse(s));if(sel&&!byId(sel))sel=null;speichernPlanen();afterChange();renderProps();}
+function restore(s){setState(JSON.parse(s));if(sel&&!byId(sel))sel=null;modusEnde();speichernPlanen();afterChange();renderProps();}
 function undo(){if(hi>0){hi--;restore(hist[hi]);}}
 function redo(){if(hi<hist.length-1){hi++;restore(hist[hi]);}}
-function afterChange(){renderList();renderTabs();requestRender();$('#bUndo').disabled=hi<=0;$('#bRedo').disabled=hi>=hist.length-1;syncPlatzInputs();}
+function afterChange(){renderList();renderTabs();requestRender();$('#bUndo').disabled=hi<=0;$('#bRedo').disabled=hi>=hist.length-1;syncPlatzInputs();renderUnterlage();}
 function saveSettings(){try{localStorage.setItem(STORE_SET,JSON.stringify(settings));}catch(e){}}
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem(STORE_SET)||'null');
   // Einstellungen von vor sv 2: alter Standard-Fang 5 cm wird zu 1 cm
@@ -85,10 +108,15 @@ function loadSettings(){try{const s=JSON.parse(localStorage.getItem(STORE_SET)||
 function sanitize(o){
   if(!o||typeof o!=='object'||!o.platz||!Array.isArray(o.fields))throw new Error('Keine gültige Projektdatei.');
   const P={L:clamp(+o.platz.L||40,5,300),B:clamp(+o.platz.B||20,5,300),belag:BELAG[o.platz.belag]?o.platz.belag:'kunststoff_rot'};
+  // Platzrand als Vieleck (aus der CAD-Unterlage): Länge und Breite = umschliessendes Rechteck
+  const rd=o.platz.rand;
+  if(Array.isArray(rd)&&rd.length>=3&&rd.length<=20000&&rd.every(p=>Array.isArray(p)&&isFinite(+p[0])&&isFinite(+p[1]))){
+    P.rand=rd.map(p=>[+p[0],+p[1]]);P.L=Math.max(0.1,...P.rand.map(p=>p[0]));P.B=Math.max(0.1,...P.rand.map(p=>p[1]));}
+  const u=o.unterlage,U=u&&typeof u==='object'?{name:String(u.name||'Unterlage'),einheit:EINHEITEN[u.einheit]?u.einheit:'m',rot:+u.rot||0,tx:+u.tx||0,ty:+u.ty||0,aus:Array.isArray(u.aus)?u.aus.map(String):[],sicht:u.sicht!==false}:null;
   const ALIAS={fussball:{I:'SL',II:'CL'}};   // ältere Stufen-Kennungen
   const fields=o.fields.filter(f=>f&&NORM[f.sport]).map(f=>{const N=NORM[f.sport],sid=(ALIAS[f.sport]||{})[f.stufe]||f.stufe,st=N.stufen.find(s=>s.id===sid)||N.stufen[0],opt={};(N.opts||[]).forEach(d=>opt[d.k]=d.def);Object.assign(opt,st.opt||{},f.opt||{});
     return {id:String(f.id||newId()),sport:f.sport,stufe:st.id,name:String(f.name||N.name),x:+f.x||0,y:+f.y||0,rot:+f.rot||0,prio:clamp(Math.round(+f.prio||1),1,PRIO_MAX),color:COLOR[f.color]?f.color:N.defColor,lw:clamp(+f.lw||N.lw,0.02,0.2),L:+f.L||st.L||0,B:+f.B||st.B||0,hidden:!!f.hidden,opt};});
-  return {name:String(o.name||'Projekt'),platz:P,fields,acks:(o.acks&&typeof o.acks==='object')?o.acks:{}};
+  return {name:String(o.name||'Projekt'),platz:P,fields,acks:(o.acks&&typeof o.acks==='object')?o.acks:{},unterlage:U};
 }
 function leererPlan(name='Neuer Markierungsplan'){return {name,platz:{L:44,B:24,belag:'kunststoff_rot'},fields:[],acks:{}};}
 function beispielPlan(){
@@ -136,7 +164,7 @@ function optInput(d,v){
 }
 function renderProps(){
   const el=$('#tab-props'),f=getSel();
-  if(!f){const P=state.platz;el.innerHTML=`<h3>Kein Feld gewählt</h3><p class="small muted">${nurAnsicht()?'Feld im Plan oder in der Liste antippen.':'Feld im Plan oder in der Liste links anklicken, oder links ein neues Feld auf den Platz setzen.'}</p><div class="info">Platz ${f2(P.L)} × ${f2(P.B)} m · ${esc(BELAG[P.belag].name)}<br>${state.fields.length} Felder</div>`;return;}
+  if(!f){const P=state.platz;el.innerHTML=`<h3>Kein Feld gewählt</h3><p class="small muted">${nurAnsicht()?'Feld im Plan oder in der Liste antippen.':'Feld im Plan oder in der Liste links anklicken, oder links ein neues Feld auf den Platz setzen.'}</p><div class="info">Platz ${hatRand()?`Vieleck, ${P.rand.length} Ecken, max. `:''}${f2(P.L)} × ${f2(P.B)} m · ${esc(BELAG[P.belag].name)}<br>${state.fields.length} Felder</div>`;return;}
   const N=NORM[f.sport],st=stufeOf(f),sz=szOf(f);
   if(nurAnsicht()){   // Handy: nur ansehen
     el.innerHTML=`<h3>${esc(f.name)}</h3><div class="small muted" style="margin:-4px 0 8px">${esc(N.name)} · ${esc(st.name)}</div>
@@ -197,7 +225,7 @@ function setTab(t){activeTab=t;document.querySelectorAll('.tabs button').forEach
 function select(id){sel=id;renderList();renderProps();requestRender();}
 
 /* ---- Platz & Hinzufügen ---- */
-function syncPlatzInputs(){const P=state.platz;for(const [id,v] of [['#pL',P.L],['#pB',P.B]]){const i=$(id);if(document.activeElement!==i)i.value=num(v);}$('#pBelag').value=P.belag;$('#projName').value=state.name;}
+function syncPlatzInputs(){const P=state.platz;for(const [id,v] of [['#pL',P.L],['#pB',P.B]]){const i=$(id);if(document.activeElement!==i)i.value=num(+v.toFixed(2));i.disabled=hatRand();i.title=hatRand()?'Aus dem Platzrand der CAD-Unterlage (umschliessendes Rechteck)':'';}$('#pBelag').value=P.belag;$('#projName').value=state.name;}
 const stufeMass=s=>s.L?(s.Lmin!=null?`${num(s.L)} × ${num(s.B)} m (Bandbreite ${num(s.Lmin)}–${num(s.Lmax)} × ${num(s.Bmin)}–${num(s.Bmax)} m)`:`${num(s.L)} × ${num(s.B)} m`):'';
 function fillAddStufen(){const N=NORM[$('#addSport').value];$('#addStufe').innerHTML=N.stufen.map(s=>`<option value="${s.id}">${esc(s.name)}${s.L?` – ${stufeMass(s)}`:''}</option>`).join('');updateAddInfo();}
 function updateAddInfo(){const N=NORM[$('#addSport').value],st=N.stufen.find(s=>s.id===$('#addStufe').value)||N.stufen[0];
@@ -226,12 +254,18 @@ function einrasten(f,nx,ny){
   if(sz.stirn>0)m.push(['x',b.x0-sz.stirn,'sz',-1]);if(sz.stirn2>0)m.push(['x',b.x1+sz.stirn2,'sz',1]);
   if(sz.laengs>0)m.push(['y',b.y0-sz.laengs,'sz',-1],['y',b.y1+sz.laengs,'sz',1]);
   const pos={x:nx,y:ny},best={x:null,y:null},sg=v=>v<0?-1:1;
+  // Vieleck-Rand: zusätzlich an allen waagrechten und senkrechten Randkanten einrasten
+  const randZ={x:[0,P.L],y:[0,P.B]};
+  if(hatRand()){const r=P.rand;for(let i=0;i<r.length;i++){const a=r[i],b=r[(i+1)%r.length];
+    if(Math.abs(a[0]-b[0])<1e-3&&Math.abs(a[1]-b[1])>0.5)randZ.x.push(a[0]);if(Math.abs(a[1]-b[1])<1e-3&&Math.abs(a[0]-b[0])>0.5)randZ.y.push(a[1]);}}
   for(const [la,v,art,seite] of m){
     // lokal → Welt (gedreht um 0/90/180/270°): Achse, Abstand zur Feldmitte, Seite
     let ax,off,sd;
     if(la==='x'){if(Math.abs(c)>0.5){ax='x';off=v*c;sd=seite*sg(c);}else{ax='y';off=v*s;sd=seite*sg(s);}}
     else{if(Math.abs(s)>0.5){ax='x';off=-v*s;sd=-seite*sg(s);}else{ax='y';off=v*c;sd=seite*sg(c);}}
-    const max=ax==='x'?P.L:P.B,ziele=art==='mitte'?[[max/2,'mittig']]:art==='sz'?(sd<0?[[0,'Sicherheitszone am Rand']]:[[max,'Sicherheitszone am Rand']]):[[0,'am Rand'],[max,'am Rand']];
+    const max=ax==='x'?P.L:P.B,ziele=art==='mitte'?[[max/2,'mittig']]
+      :art==='sz'?(hatRand()?randZ[ax].map(v=>[v,'Sicherheitszone am Rand']):sd<0?[[0,'Sicherheitszone am Rand']]:[[max,'Sicherheitszone am Rand']])
+      :randZ[ax].map(v=>[v,'am Rand']);
     for(const [z,t] of ziele){const d=z-(pos[ax]+off);if(Math.abs(d)<=tol&&(!best[ax]||Math.abs(d)<Math.abs(best[ax].d)))best[ax]={d,z,t};}
   }
   const linien=[];
@@ -242,12 +276,152 @@ function rotateSel(d){const f=getSel();if(!f)return;const a0=ankerWelt(f);f.rot=
 function duplicateSel(){const f=getSel();if(!f)return;const c=JSON.parse(JSON.stringify(f));c.id=newId();c.name=uniqueName(f.name.replace(/ \d+$/,''));c.x+=2;c.y+=2;state.fields.push(c);sel=c.id;commit();renderProps();}
 function deleteSel(){const f=getSel();if(!f)return;state.fields=state.fields.filter(x=>x!==f);sel=null;commit();renderProps();}
 
+/* ---- CAD-Unterlage und Platzrand ---- */
+let ebenenOffen=false;
+function renderUnterlage(){
+  const box=$('#uBox'),ri=$('#randInfo');if(!box||!state)return;const U=state.unterlage;
+  ri.innerHTML=hatRand()?`<div class="info">Platzrand aus der CAD-Unterlage: Vieleck mit ${state.platz.rand.length} Ecken. Länge und Breite = umschliessendes Rechteck.
+    <div class="btnrow" style="margin:6px 0 0"><button class="btn sm" data-u="drehL" title="Ganzen Plan drehen">⟲ 90°</button><button class="btn sm" data-u="drehR" title="Ganzen Plan drehen">⟳ 90°</button><button class="btn sm" data-u="rechteck">Wieder Rechteck</button></div></div>`:'';
+  if(!U){box.innerHTML=`<button class="btn wide" data-u="laden">DXF-Datei laden …</button><div class="small muted" style="margin-top:6px">Plan vom Architekten als Hintergrund, z. B. um einen schiefen Platzrand zu übernehmen. DWG zuerst als DXF speichern (z. B. ODA File Converter).</div>`;return;}
+  if(!uGeo){box.innerHTML=`<div class="small">Die Linien der Unterlage «${esc(U.name)}» fehlen auf diesem Gerät.</div><div class="btnrow"><button class="btn sm" data-u="laden">DXF neu laden …</button><button class="btn sm danger" data-u="weg">Entfernen</button></div>`;return;}
+  const aus=new Set(U.aus||[]),g=zeichnungsGroesse(uGeo,U.einheit),nv=uGeo.ebenen.filter(e=>!aus.has(e)).length;
+  box.innerHTML=`<div class="small" style="margin-bottom:6px"><b>${esc(U.name)}</b><br>${uGeo.polys.length} ${uGeo.polys.length===1?'Linie':'Linien'} ·${f1(g.w)} × ${f1(g.h)} m${uGeo.gekuerzt?' · <span class="c-warnung">gekürzt (sehr grosse Zeichnung)</span>':''}</div>
+    <label class="chk"><input type="checkbox" data-u="sicht" ${U.sicht!==false?'checked':''}> Unterlage anzeigen</label>
+    <div class="g2"><label class="fld"><span>Einheit der Zeichnung</span><select data-u="einheit">${Object.keys(EINHEITEN).map(e=>`<option value="${e}" ${e===U.einheit?'selected':''}>${e}${e===uGeo.datei?' (laut Datei)':''}</option>`).join('')}</select></label>
+      <label class="fld"><span>Drehung <em>(°)</em></span><input type="number" step="0.01" data-u="rot" value="${+(+U.rot).toFixed(3)}"></label></div>
+    <div class="g2"><label class="fld"><span>Verschiebung X <em>(m)</em></span><input type="number" step="0.01" data-u="tx" value="${+(+U.tx).toFixed(3)}"></label>
+      <label class="fld"><span>Verschiebung Y <em>(m)</em></span><input type="number" step="0.01" data-u="ty" value="${+(+U.ty).toFixed(3)}"></label></div>
+    <div class="btnrow"><button class="btn sm" data-u="ausrichten" title="Eine Kante gerade richten, dann einen Eckpunkt auf die Platzecke oben links setzen">Ausrichten …</button><button class="btn sm primary" data-u="rand" title="Geschlossene Linie der Unterlage als Platzrand verwenden">Platzrand übernehmen …</button></div>
+    <details id="uEbenen" ${ebenenOffen?'open':''}><summary class="small">Ebenen (${nv} von ${uGeo.ebenen.length} sichtbar)</summary>
+      <div class="btnrow"><button class="btn sm" data-u="alle">alle</button><button class="btn sm" data-u="keine">keine</button></div>
+      <div class="ebenen">${uGeo.ebenen.map(e=>`<label class="chk"><input type="checkbox" data-eb="${esc(e)}" ${aus.has(e)?'':'checked'}> ${esc(e)}</label>`).join('')}</div></details>
+    <div class="btnrow"><button class="btn sm" data-u="zeigen">Ganze Unterlage zeigen</button><button class="btn sm" data-u="laden">Andere Datei …</button><button class="btn sm danger" data-u="weg">Entfernen</button></div>`;
+}
+async function dxfLaden(file){
+  meldung('DXF wird gelesen …');await new Promise(r=>setTimeout(r,30));
+  let geo;try{geo=dxfLesen(dxfText(await file.arrayBuffer()),file.name);}catch(err){meldung('DXF konnte nicht gelesen werden: '+(err&&err.message||err));return;}
+  const g=zeichnungsGroesse(geo,geo.einheit),P=state.platz,alt=state.unterlage;
+  uGeo=geo;
+  // gleiche Lage behalten, wenn eine Unterlage neu geladen wird; sonst Zeichnung auf die Platzmitte
+  state.unterlage=alt&&alt.name===file.name?{...alt,aus:alt.aus||geo.aus.slice()}:{name:file.name,einheit:geo.einheit,rot:0,tx:+(P.L/2-g.w/2).toFixed(3),ty:+(P.B/2-g.h/2).toFixed(3),aus:geo.aus.slice(),sicht:true};
+  try{await db.markierungsplanSpeichern({id:planId,name:state.name,daten:JSON.parse(snapshot()),unterlage:geo});}catch(e){meldung('Speichern fehlgeschlagen: '+(e&&e.message||e));}
+  commit();fitUnterlage();
+  meldung(`Unterlage geladen: ${geo.polys.length} ${geo.polys.length===1?'Linie':'Linien'}, Einheit ${state.unterlage.einheit}${geo.datei?' (laut Datei)':' (geschätzt, bitte prüfen)'}${geo.gekuerzt?'. Die Zeichnung ist sehr gross und wurde gekürzt.':'.'}`);
+}
+async function unterlageEntfernen(){
+  if(!confirm('CAD-Unterlage aus diesem Plan entfernen? Ein übernommener Platzrand bleibt.'))return;
+  state.unterlage=null;uGeo=null;modusEnde();
+  try{await db.markierungsplanSpeichern({id:planId,name:state.name,daten:JSON.parse(snapshot()),unterlage:null});}catch(e){}
+  commit();
+}
+// Ganzer Plan starr bewegen: um Winkel d (°) um den Ursprung drehen, dann um (dx,dy) verschieben.
+// Betrifft Felder, Unterlage und Platzrand, damit alles zueinander an Ort und Stelle bleibt.
+function planBewegen(d,dx,dy){
+  const a=rad(d),c=Math.cos(a),s=Math.sin(a),T=(x,y)=>[c*x-s*y+dx,s*x+c*y+dy];
+  for(const f of state.fields){const [x,y]=T(f.x,f.y);f.x=+x.toFixed(4);f.y=+y.toFixed(4);f.rot=+norm360(f.rot+d).toFixed(4);}
+  const U=state.unterlage;if(U){const [x,y]=T(U.tx,U.ty);U.tx=+x.toFixed(4);U.ty=+y.toFixed(4);U.rot=+norm360(U.rot+d).toFixed(4);}
+  if(hatRand())state.platz.rand=state.platz.rand.map(([x,y])=>T(x,y));
+}
+// Platzrand in die Ecke oben links schieben, Länge und Breite setzen; achsparalleles Rechteck → wieder einfacher Platz
+function randNormieren(){
+  const r=state.platz.rand,x0=Math.min(...r.map(p=>p[0])),y0=Math.min(...r.map(p=>p[1]));
+  planBewegen(0,-x0,-y0);
+  const q=state.platz.rand.map(([x,y])=>[+x.toFixed(4),+y.toFixed(4)]),L=Math.max(...q.map(p=>p[0])),B=Math.max(...q.map(p=>p[1]));
+  state.platz.L=+L.toFixed(4);state.platz.B=+B.toFixed(4);
+  const rechteck=q.length===4&&q.every((p,i)=>{const n=q[(i+1)%4];return Math.abs(p[0]-n[0])<1e-3||Math.abs(p[1]-n[1])<1e-3;});
+  if(rechteck)delete state.platz.rand;else state.platz.rand=q;
+  return rechteck;
+}
+// Punkte näher als 1 mm und Punkte auf einer Geraden (Abweichung < 1 mm) weglassen
+function vereinfachen(pts){
+  let p=pts.map(q=>[q.x,q.y]).filter((q,i,a)=>{const n=a[(i+1)%a.length];return Math.hypot(q[0]-n[0],q[1]-n[1])>=1e-3;});
+  let weiter=true;
+  while(weiter&&p.length>3){weiter=false;
+    for(let i=0;i<p.length&&p.length>3;i++){const a=p[(i-1+p.length)%p.length],b=p[i],c=p[(i+1)%p.length],l=Math.hypot(c[0]-a[0],c[1]-a[1]);
+      if(l>0&&Math.abs((c[0]-a[0])*(a[1]-b[1])-(a[0]-b[0])*(c[1]-a[1]))/l<1e-3){p.splice(i,1);i--;weiter=true;}}}
+  return p;
+}
+function randUebernehmen(pts){
+  const p=vereinfachen(pts);if(p.length<3){meldung('Diese Linie ergibt keinen Platzrand.');return;}
+  // längste Kante waagrecht, längere Seite des Platzes quer
+  let lang=0,phi=0;for(let i=0;i<p.length;i++){const a=p[i],b=p[(i+1)%p.length],l=Math.hypot(b[0]-a[0],b[1]-a[1]);if(l>lang){lang=l;phi=deg(Math.atan2(b[1]-a[1],b[0]-a[0]));}}
+  state.platz.rand=p;
+  planBewegen(-(phi-180*Math.round(phi/180)),0,0);
+  const r=state.platz.rand,w=Math.max(...r.map(q=>q[0]))-Math.min(...r.map(q=>q[0])),h=Math.max(...r.map(q=>q[1]))-Math.min(...r.map(q=>q[1]));
+  if(h>w*1.02)planBewegen(-90,0,0);
+  const rechteck=randNormieren();
+  commit();renderProps();fitView();
+  meldung(rechteck?`Platz ist ein Rechteck: ${f2(state.platz.L)} × ${f2(state.platz.B)} m übernommen.`:`Platzrand übernommen: ${state.platz.rand.length} Ecken, umschliessendes Rechteck ${f2(state.platz.L)} × ${f2(state.platz.B)} m.`);
+}
+function planDrehen(d){if(!hatRand())return;planBewegen(d,0,0);randNormieren();commit();renderProps();fitView();}
+function randAufheben(){if(!hatRand())return;delete state.platz.rand;commit();renderProps();}
+// Unterlage um einen Weltpunkt drehen
+function unterlageDrehen(U,d,pv){const a=rad(d),c=Math.cos(a),s=Math.sin(a),dx=U.tx-pv.x,dy=U.ty-pv.y;
+  U.tx=+(pv.x+c*dx-s*dy).toFixed(4);U.ty=+(pv.y+s*dx+c*dy).toFixed(4);U.rot=+norm360(U.rot+d).toFixed(4);}
+
+/* Klick-Modus auf der Zeichenfläche */
+const MODUS_TEXT={
+  kante:'Ausrichten 1/2: Kante der Unterlage anklicken, die gerade werden soll (waagrecht oder senkrecht).',
+  punkt:'Ausrichten 2/2: Punkt der Unterlage anklicken, der auf die Platzecke oben links kommt.',
+  rand:'Platzrand in der Unterlage anklicken (geschlossene Linie oder Linien, die sich treffen).'};
+function modusStart(m){
+  if(!uGeo||!state.unterlage)return;
+  if(state.unterlage.sicht===false){state.unterlage.sicht=true;commit();}
+  modus=m;modusHover=null;sel=null;
+  const h=$('#modusHint');h.innerHTML=`<span>${MODUS_TEXT[m]}</span><button class="btn sm" data-modus="ab">Abbrechen (Esc)</button>`;h.hidden=false;
+  svg.style.cursor='crosshair';renderList();renderProps();requestRender();
+}
+function modusEnde(){if(!modus)return;modus=null;modusHover=null;$('#modusHint').hidden=true;svg.style.cursor='default';requestRender();}
+function modusSuchen(w){
+  const U=state.unterlage,tol=12/view.s;if(!U||!uGeo)return null;
+  if(modus==='kante')return naechsteKante(uGeo,U,w.x,w.y,tol);
+  if(modus==='punkt')return naechsterPunkt(uGeo,U,w.x,w.y,tol);
+  if(modus==='rand'){const k=naechsteKante(uGeo,U,w.x,w.y,tol);return k?{pi:k.pi,...zugPunkte(uGeo,U,k.pi)}:null;}
+  return null;
+}
+function modusKlick(w){
+  const U=state.unterlage,h=modusSuchen(w);
+  if(modus==='kante'){if(!h){meldung('Keine Kante getroffen. Näher an eine Linie klicken.');return;}
+    const phi=deg(Math.atan2(h.b.y-h.a.y,h.b.x-h.a.x));unterlageDrehen(U,-(phi-90*Math.round(phi/90)),h.p);
+    commit();modusStart('punkt');return;}
+  if(modus==='punkt'){const p=h?{x:h.x,y:h.y}:w;U.tx=+(U.tx-p.x).toFixed(4);U.ty=+(U.ty-p.y).toFixed(4);
+    modusEnde();commit();meldung(h?'Unterlage ausgerichtet.':'Unterlage ausgerichtet (frei geklickter Punkt, kein Linienende in der Nähe).');return;}
+  if(modus==='rand'){if(!h){meldung('Keine Linie getroffen. Näher an den Platzrand klicken.');return;}
+    const pts=geschlossenerZug(uGeo,U,h.pi);
+    if(!pts){meldung('Daraus ergibt sich keine geschlossene Linie. Andere Linie anklicken oder störende Ebenen ausblenden.');return;}
+    modusEnde();randUebernehmen(pts);}
+}
+
 /* ================= Ereignisse ================= */
 function bind(){
   $('#addSport').innerHTML=['Ballspiele','Leichtathletik'].map(g=>`<optgroup label="${g}">${Object.entries(NORM).filter(([,N])=>N.gruppe===g).sort((a,b)=>a[1].name.localeCompare(b[1].name,'de')).map(([k,N])=>`<option value="${k}">${N.name}</option>`).join('')}</optgroup>`).join('');
   $('#pBelag').innerHTML=BELAEGE.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
   $('#addSport').addEventListener('change',fillAddStufen);$('#addStufe').addEventListener('change',updateAddInfo);fillAddStufen();
   $('#bAdd').addEventListener('click',addField);
+  // CAD-Unterlage
+  $('#dxfIn').addEventListener('change',e=>{const file=e.target.files[0];e.target.value='';if(file)dxfLaden(file);});
+  const uKlick=e=>{const b=e.target.closest('button[data-u]');if(!b||nurAnsicht())return;const U=state.unterlage;
+    switch(b.dataset.u){
+      case 'laden':$('#dxfIn').click();break;
+      case 'zeigen':fitUnterlage();break;
+      case 'weg':unterlageEntfernen();break;
+      case 'ausrichten':modusStart('kante');break;
+      case 'rand':modusStart('rand');break;
+      case 'alle':if(U){U.aus=[];commit();}break;
+      case 'keine':if(U&&uGeo){U.aus=uGeo.ebenen.slice();commit();}break;
+      case 'drehL':planDrehen(-90);break;
+      case 'drehR':planDrehen(90);break;
+      case 'rechteck':randAufheben();break;}};
+  const uAenderung=e=>{const t=e.target,U=state.unterlage;if(!U||nurAnsicht())return;
+    if(t.dataset.eb!=null){const aus=new Set(U.aus||[]);if(t.checked)aus.delete(t.dataset.eb);else aus.add(t.dataset.eb);U.aus=[...aus];commit();return;}
+    const k=t.dataset.u;if(!k)return;
+    if(k==='sicht'){U.sicht=t.checked;commit();return;}
+    if(k==='einheit'&&EINHEITEN[t.value]){U.einheit=t.value;commit();return;}
+    if(k==='rot'||k==='tx'||k==='ty'){const v=parseFloat(t.value);if(isFinite(v)){U[k]=k==='rot'?norm360(v):v;commit();}}};
+  for(const el of [$('#uBox'),$('#randInfo')]){el.addEventListener('click',uKlick);el.addEventListener('change',uAenderung);}
+  $('#uBox').addEventListener('toggle',e=>{if(e.target.id==='uEbenen')ebenenOffen=e.target.open;},true);
+  $('#modusHint').addEventListener('click',e=>{if(e.target.closest('[data-modus]'))modusEnde();});
+  setUnterlageDruck(gw=>state.unterlage&&uGeo?unterlageSVG(uGeo,state.unterlage,{gw}):'');
   for(const [id,k] of [['#pL','L'],['#pB','B']]){const i=$(id);
     i.addEventListener('input',()=>{const v=parseFloat(i.value);if(isFinite(v)&&v>=5&&v<=300){state.platz[k]=v;requestRender();}});
     i.addEventListener('change',()=>{commit();});}
@@ -257,7 +431,10 @@ function bind(){
   for(const [id,k] of Object.entries(toggles)){const i=$('#'+id);i.checked=!!settings[k];i.addEventListener('change',()=>{settings[k]=i.checked;saveSettings();if(k==='gaps')afterChange();else requestRender();});}
   const sn=$('#sSnap');sn.value=String(settings.snap);if(sn.value==='')sn.value='0.01';sn.addEventListener('change',()=>{settings.snap=parseFloat(sn.value)||0;saveSettings();});
   $('#bUndo').addEventListener('click',undo);$('#bRedo').addEventListener('click',redo);
-  $('#bSave').addEventListener('click',()=>download(fname('json'),JSON.stringify({app:'markierungsplaner',version:1,...state},null,2),'application/json'));
+  // Plan als Datei: Zustand und (falls vorhanden) die Linien der CAD-Unterlage in einer Datei
+  $('#bSave').addEventListener('click',()=>{const daten={app:'markierungsplaner',version:1,...state};let t=JSON.stringify(daten,null,2);
+    if(state.unterlage&&uGeo)t=t.replace(/\n}$/,`,\n  "unterlageDaten": ${JSON.stringify(uGeo)}\n}`);
+    download(fname('json'),t,'application/json');});
   $('#wcount').addEventListener('click',()=>setTab('warn'));
   document.querySelectorAll('.tabs button').forEach(b=>b.addEventListener('click',()=>setTab(b.dataset.tab)));
   document.addEventListener('click',e=>{const b=e.target.closest('[data-exp]');if(b){$('#mExport').open=false;doExport(b.dataset.exp);}else if(!e.target.closest('#mExport'))$('#mExport').open=false;});
@@ -353,6 +530,8 @@ function bind(){
     const w=s2w(e),pan={mode:'pan',sx:e.clientX,sy:e.clientY,tx:view.tx,ty:view.ty,moved:false};
     if(e.button===1||e.button===2||spaceDown){drag=pan;return;}
     if(e.button!==0)return;
+    // Klick-Modus der Unterlage: Antippen wählt, Ziehen verschiebt die Ansicht
+    if(modus){drag={...pan,modusKlick:true};return;}
     const f=getSel();
     if(f&&!f.hidden&&!nurAnsicht()){const hp=handlePos(f);if(Math.hypot(w.x-hp.x,w.y-hp.y)<=10/view.s){const pv=ankerWelt(f);
       drag={mode:'rotate',id:f.id,moved:false,pivot:pv,r0:f.rot,a0:pv?deg(Math.atan2(w.y-pv.y,w.x-pv.x)):0};return;}}
@@ -366,7 +545,7 @@ function bind(){
     if(pointers.has(e.pointerId))pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
     const w=s2w(e);$('#coords').textContent=`X ${f2(w.x)} m   Y ${f2(w.y)} m`;
     if(pinch&&pointers.size===2){const [a,b]=[...pointers.values()],r=svg.getBoundingClientRect(),d=Math.hypot(a.x-b.x,a.y-b.y),s=clamp(pinch.s*d/pinch.d,0.3,600),wx=(pinch.mx-r.left-pinch.tx)/pinch.s,wy=(pinch.my-r.top-pinch.ty)/pinch.s,mx=(a.x+b.x)/2-r.left,my=(a.y+b.y)/2-r.top;view.s=s;view.tx=mx-wx*s;view.ty=my-wy*s;requestRender();return;}
-    if(!drag){hover(w);return;}
+    if(!drag){if(modus){modusHover=modusSuchen(w);requestRender();}else hover(w);return;}
     const dxs=e.clientX-(drag.sx??e.clientX),dys=e.clientY-(drag.sy??e.clientY);
     if(!drag.moved&&Math.hypot(dxs,dys)>3)drag.moved=true;
     if(drag.mode==='pan'){if(drag.moved){view.tx=drag.tx+dxs;view.ty=drag.ty+dys;requestRender();}}
@@ -379,6 +558,7 @@ function bind(){
       a=e.shiftKey?Math.round(a):Math.round(a/15)*15;const p0=ankerWelt(f);f.rot=norm360(a);ankerHalten(f,p0);drag.moved=true;syncXY(f);requestRender();}
   });
   function endP(e){pointers.delete(e.pointerId);if(pointers.size<2)pinch=null;if(fangLinien.length){fangLinien=[];requestRender();}if(!drag)return;const d=drag;drag=null;
+    if(d.modusKlick){if(!d.moved&&e.type==='pointerup'&&modus)modusKlick(s2w(e));return;}
     if((d.mode==='move'||d.mode==='rotate')&&d.moved){commit();updateInfo();}
     else if(d.cands&&!d.moved&&d.prev===d.id&&d.cands.length>1){const i=d.cands.findIndex(c=>c.id===d.id);select(d.cands[(i+1)%d.cands.length].id);}}
   svg.addEventListener('pointerup',endP);svg.addEventListener('pointercancel',endP);
@@ -391,6 +571,7 @@ function bind(){
   window.addEventListener('keydown',e=>{
     const tag=(e.target.tagName||'').toLowerCase(),typing=tag==='input'||tag==='textarea'||tag==='select';
     if(e.key==='Escape'&&ld){listEnde(null,true);e.preventDefault();return;}   // Ziehen in der Feldliste abbrechen
+    if(e.key==='Escape'&&modus){modusEnde();e.preventDefault();return;}
     if(e.key===' '&&!typing){spaceDown=true;svg.style.cursor='grab';e.preventDefault();return;}
     if(typing||document.body.dataset.ansicht!=='plan')return;const mod=e.ctrlKey||e.metaKey,k=e.key.toLowerCase();
     if(nurAnsicht()){if(k==='f')fitView();if(e.key==='Escape')select(null);return;}
@@ -420,9 +601,10 @@ function bind(){
 
 /* ================= Ausgabe ================= */
 function doExport(kind){
-  if(kind==='print'){$('#prTitle').value=state.name;updatePrintInfo();$('#dlgPrint').showModal();return;}
+  if(kind==='print'){$('#prTitle').value=state.name;$('#prUnterlageZeile').hidden=!(state.unterlage&&uGeo);updatePrintInfo();$('#dlgPrint').showModal();return;}
   if(kind==='dxf'){download(fname('dxf'),buildDXF(),'application/dxf');return;}
-  if(kind==='svg'){const ext=planExtents(true,1);download(fname('svg'),'<?xml version="1.0" encoding="UTF-8"?>\n'+planSVG(ext,{minW:0,gw:0.03,safety:settings.safety,notes:settings.notes},`${n4((ext.x1-ext.x0)*10)}mm`,`${n4((ext.y1-ext.y0)*10)}mm`),'image/svg+xml');return;}
+  if(kind==='svg'){const ext=planExtents(true,1),U=state.unterlage,us=U&&uGeo&&U.sicht!==false?unterlageSVG(uGeo,U,{gw:0.03}):'';
+    download(fname('svg'),'<?xml version="1.0" encoding="UTF-8"?>\n'+planSVG(ext,{minW:0,gw:0.03,safety:settings.safety,notes:settings.notes,unterlage:us},`${n4((ext.x1-ext.x0)*10)}mm`,`${n4((ext.y1-ext.y0)*10)}mm`),'image/svg+xml');return;}
   if(kind==='csv'){download(fname('csv'),'﻿'+buildCSV(),'text/csv;charset=utf-8');return;}
   if(kind==='pts'){const rows=[['Feld','Teil','X (m)','Y (m)']].concat(allPosts().map(p=>[p.f.name,p.label,f2(p.x),f2(p.y)]));download(fname('einbauteile.csv'),'﻿'+rows.map(r=>r.map(csvCell).join(';')).join('\r\n'),'text/csv;charset=utf-8');}
 }
@@ -431,9 +613,9 @@ function doExport(kind){
 function meldung(text){const m=$('#meldung');m.textContent=text;m.hidden=false;clearTimeout(meldung.t);meldung.t=setTimeout(()=>{m.hidden=true;},3500);}
 function ansichtSetzen(a){document.body.dataset.ansicht=a;}
 const datumKurz=iso=>{try{return new Date(iso).toLocaleDateString('de-CH');}catch(_){return '';}};
-async function planNeuAnlegen(daten){
+async function planNeuAnlegen(daten,unterlage){
   const id=db.neueId();
-  await db.markierungsplanSpeichern({id,name:daten.name,daten});
+  await db.markierungsplanSpeichern({id,name:daten.name,daten,...(geoGueltig(unterlage)?{unterlage}:{})});
   location.hash='#/plan/'+encodeURIComponent(id);
 }
 async function listeZeigen(){
@@ -451,6 +633,7 @@ async function planOeffnen(id){
   let rec=null;try{rec=await db.holen('markierungsplaene',id);}catch(e){meldung('Plan konnte nicht geladen werden.');}
   if(!rec){meldung('Diesen Plan gibt es nicht mehr.');location.hash='#/';return;}
   let daten;try{daten=sanitize(rec.daten);}catch(_){daten=leererPlan(rec.name);}
+  modusEnde();uGeo=geoGueltig(rec.unterlage)?rec.unterlage:null;
   planId=id;setState(daten);sel=null;ackEdit=null;hist=[snapshot()];hi=0;
   ansichtSetzen('plan');document.title=daten.name+' – Markierungsplan';
   if(!planOeffnen.gebunden){bind();planOeffnen.gebunden=true;}
@@ -463,10 +646,10 @@ function listeBinden(){
   $('#lBeispiel').addEventListener('click',()=>planNeuAnlegen(JSON.parse(JSON.stringify(beispielPlan()))));
   $('#lOeffnen').addEventListener('click',()=>$('#fileIn').click());
   $('#fileIn').addEventListener('change',e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();
-    r.onload=async()=>{try{await planNeuAnlegen(sanitize(JSON.parse(r.result)));}catch(err){meldung('Datei konnte nicht geöffnet werden: '+err.message);}e.target.value='';};r.readAsText(file);});
+    r.onload=async()=>{try{const j=JSON.parse(r.result);await planNeuAnlegen(sanitize(j),j.unterlageDaten);}catch(err){meldung('Datei konnte nicht geöffnet werden: '+err.message);}e.target.value='';};r.readAsText(file);});
   $('#plan-liste').addEventListener('click',async e=>{const b=e.target.closest('[data-pa]');if(!b)return;e.preventDefault();
     const id=b.closest('.plan-zeile').dataset.id,rec=await db.holen('markierungsplaene',id);if(!rec)return;
-    if(b.dataset.pa==='dup'){const daten={...rec.daten,name:(rec.name||'Plan')+' (Kopie)'};await db.markierungsplanSpeichern({id:db.neueId(),name:daten.name,daten});listeZeigen();}
+    if(b.dataset.pa==='dup'){const daten={...rec.daten,name:(rec.name||'Plan')+' (Kopie)'};await db.markierungsplanSpeichern({id:db.neueId(),name:daten.name,daten,...(rec.unterlage?{unterlage:rec.unterlage}:{})});listeZeigen();}
     if(b.dataset.pa==='del'&&confirm(`Plan «${rec.name}» löschen? Das kann nicht rückgängig gemacht werden (ausser über eine Sicherung).`)){await db.markierungsplanLoeschen(id);listeZeigen();}});
 }
 
@@ -481,6 +664,6 @@ function init(){
   document.addEventListener('visibilitychange',()=>{if(document.hidden)speichernJetzt();});
   route();
   // Nur zum Testen: ?debug in der Adresse macht interne Funktionen zugänglich.
-  if(/[?&]debug\b/.test(location.search))window.__mp={NORM,makeField,state:()=>state,getWarnings,quantities,buildDXF,buildCSV,buildPrint,printOpts};
+  if(/[?&]debug\b/.test(location.search))window.__mp={NORM,makeField,state:()=>state,getWarnings,quantities,buildDXF,buildCSV,buildPrint,printOpts,unterlage:()=>uGeo,dxfLesen,view};
 }
 init();

@@ -102,18 +102,46 @@ function computeAll(){
 }
 
 /* ================= Prüfungen ================= */
+/* ---- Platzrand: Rechteck 0..L × 0..B oder Vieleck aus der CAD-Unterlage (state.platz.rand) ---- */
+const hatRand=()=>Array.isArray(state.platz.rand)&&state.platz.rand.length>=3;
+function randPunkte(){const P=state.platz;return hatRand()?P.rand:[[0,0],[P.L,0],[P.L,P.B],[0,P.B]];}
+// Abstand zum Rand (immer positiv)
+function randAbstand(x,y){const r=randPunkte();let d=Infinity;
+  for(let i=0;i<r.length;i++){const [ax,ay]=r[i],[bx,by]=r[(i+1)%r.length],dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;
+    let t=l2>0?((x-ax)*dx+(y-ay)*dy)/l2:0;t=Math.max(0,Math.min(1,t));d=Math.min(d,Math.hypot(x-ax-t*dx,y-ay-t*dy));}
+  return d;}
+// Liegt der Punkt auf dem Platz? Punkte auf dem Rand (± 1 mm) zählen als drin.
+function imPlatz(x,y){
+  if(!hatRand()){const P=state.platz;return x>=-1e-6&&y>=-1e-6&&x<=P.L+1e-6&&y<=P.B+1e-6;}
+  const r=state.platz.rand;let drin=false;
+  for(let i=0,j=r.length-1;i<r.length;j=i++){const [xi,yi]=r[i],[xj,yj]=r[j];if((yi>y)!==(yj>y)&&x<(xj-xi)*(y-yi)/(yj-yi)+xi)drin=!drin;}
+  return drin||randAbstand(x,y)<=1e-3;}
 function rayAvail(p,n){
+  if(hatRand()){
+    if(!imPlatz(p.x,p.y))return -randAbstand(p.x,p.y);
+    const r=state.platz.rand;let t=Infinity;
+    for(let i=0;i<r.length;i++){const [ax,ay]=r[i],[bx,by]=r[(i+1)%r.length],ex=bx-ax,ey=by-ay,den=n.x*ey-n.y*ex;if(Math.abs(den)<1e-12)continue;
+      const s=((ax-p.x)*ey-(ay-p.y)*ex)/den,u=((ax-p.x)*n.y-(ay-p.y)*n.x)/den;if(s>=-1e-9&&u>=-1e-9&&u<=1+1e-9)t=Math.min(t,Math.max(0,s));}
+    return t;}
   const L=state.platz.L,B=state.platz.B,out=Math.max(-p.x,p.x-L,-p.y,p.y-B,0);if(out>1e-9)return -out;
   let t=Infinity;if(n.x>1e-9)t=Math.min(t,(L-p.x)/n.x);if(n.x<-1e-9)t=Math.min(t,-p.x/n.x);if(n.y>1e-9)t=Math.min(t,(B-p.y)/n.y);if(n.y<-1e-9)t=Math.min(t,-p.y/n.y);return t;
 }
+// Wie weit ragt das Rechteck b (lokal im Feld f) über den Vieleck-Rand? Ecken ausserhalb und Randecken, die ins Rechteck stechen.
+function ueberRand(f,b){
+  let m=0;for(const [x,y] of [[b.x0,b.y0],[b.x1,b.y0],[b.x1,b.y1],[b.x0,b.y1]]){const p=toW(f,x,y);if(!imPlatz(p.x,p.y))m=Math.max(m,randAbstand(p.x,p.y));}
+  for(const [X,Y] of state.platz.rand){const q=toL(f,X,Y),t=Math.min(q.x-b.x0,b.x1-q.x,q.y-b.y0,b.y1-q.y);if(t>0)m=Math.max(m,t);}
+  return m;}
 function sideName(n){if(Math.abs(n.x)>=Math.abs(n.y))return n.x>0?'rechts':'links';return n.y>0?'unten':'oben';}
 // Kanten, die auf dem Platz liegen müssen (Weitsprung: nur Anlauf, die Grube darf hinaus)
 const platzBox=f=>{const g=geoLocal(f);return g.platzBox||g.outline;};
 function sides(f){
   const b=platzBox(f),[c,s]=trig(f);
   const defs=[{id:'s1',stirn:true,pts:[[b.x0,b.y0],[b.x0,b.y1]],n:[-1,0]},{id:'s2',stirn:true,pts:[[b.x1,b.y0],[b.x1,b.y1]],n:[1,0]},{id:'l1',stirn:false,pts:[[b.x0,b.y0],[b.x1,b.y0]],n:[0,-1]},{id:'l2',stirn:false,pts:[[b.x0,b.y1],[b.x1,b.y1]],n:[0,1]}];
+  // Vieleck-Rand: mehr Punkte entlang der Seite prüfen (Einbuchtungen)
+  const n=hatRand()?8:2;
   return defs.map(d=>{const nw={x:d.n[0]*c-d.n[1]*s,y:d.n[0]*s+d.n[1]*c},ps=d.pts.map(p=>toW(f,p[0],p[1])),mid={x:(ps[0].x+ps[1].x)/2,y:(ps[0].y+ps[1].y)/2};
-    return {...d,nw,mid,avail:Math.min(rayAvail(ps[0],nw),rayAvail(ps[1],nw),rayAvail(mid,nw)),midAvail:rayAvail(mid,nw),name:sideName(nw)};});
+    let avail=Infinity;for(let i=0;i<=n;i++){const t=i/n;avail=Math.min(avail,rayAvail({x:ps[0].x+(ps[1].x-ps[0].x)*t,y:ps[0].y+(ps[1].y-ps[0].y)*t},nw));}
+    return {...d,nw,mid,avail,midAvail:rayAvail(mid,nw),name:sideName(nw)};});
 }
 const LV={hoch:0,warnung:1,hinweis:2},LVNAME={hoch:'Wichtig',warnung:'Warnung',hinweis:'Hinweis'};
 let warnCache={key:'',val:[]};
@@ -135,9 +163,11 @@ function getWarnings(){
     }
     if(f.sport==='fussball'&&st.gruppe==='jun'&&P.belag==='kunstrasen')add(`kr:${f.id}`,'hinweis',f,`${f.name}: Auf Kunststoffrasen empfiehlt der SFV, Juniorenfelder nicht einzuzeichnen, sondern mit Stangen, Hütchen oder Bändern zu markieren (SFV-Richtlinien 2026, Kap. 6).`);
     const sz=szOf(f),ob=platzBox(f),cs=[[ob.x0,ob.y0],[ob.x1,ob.y0],[ob.x1,ob.y1],[ob.x0,ob.y1]].map(p=>toW(f,p[0],p[1]));
+    if(hatRand()){const v=ueberRand(f,ob);if(v>0.005)add(`out:${f.id}`,'hoch',f,`${f.name}: ragt über den Platzrand (bis ${f2(v)} m).`);}
+    else{
     const over={links:Math.max(0,-Math.min(...cs.map(p=>p.x))),rechts:Math.max(0,Math.max(...cs.map(p=>p.x))-P.L),oben:Math.max(0,-Math.min(...cs.map(p=>p.y))),unten:Math.max(0,Math.max(...cs.map(p=>p.y))-P.B)};
     const ov=Object.entries(over).filter(([,v])=>v>0.005);
-    if(ov.length)add(`out:${f.id}`,'hoch',f,`${f.name}: ragt über den Platzrand (${ov.map(([k,v])=>`${k} ${f2(v)} m`).join(', ')}).`);
+    if(ov.length)add(`out:${f.id}`,'hoch',f,`${f.name}: ragt über den Platzrand (${ov.map(([k,v])=>`${k} ${f2(v)} m`).join(', ')}).`);}
     for(const sd of sides(f)){const req=szSeite(sz,sd);
       if(req>0&&sd.avail>=-0.005&&sd.avail<req-0.005)add(`sz:${f.id}:${sd.id}`,'hoch',f,`${f.name}: Sicherheitszone ${sd.name} nur ${f2(Math.max(0,sd.avail))} m statt ${f2(req)} m.`);}
     // Meldungen als Text (Schlüssel = Nummer) oder als {k,t} mit festem Schlüssel, damit Bestätigungen nicht verrutschen
@@ -152,7 +182,7 @@ function getWarnings(){
     for(const o of fs){if(o===f)continue;const b=geoLocal(o).outline,sz=szOf(o),q=toL(o,wp.x,wp.y);
       const inF=q.x>=b.x0&&q.x<=b.x1&&q.y>=b.y0&&q.y<=b.y1,inS=q.x>=b.x0-sz.stirn&&q.x<=b.x1+sz.stirn2&&q.y>=b.y0-sz.laengs&&q.y<=b.y1+sz.laengs;
       if(inF||inS)add(`post:${f.id}:${i}:${o.id}`,'warnung',f,`${f.name}: ${p.label} liegt ${inF?(NORM[o.sport].sized?'im Spielfeld':'im Bereich'):'in der Sicherheitszone'} von ${o.name}.`);}});}
-  for(const f of fs){const out=geoLocal(f).posts.filter(p=>{const q=toW(f,p.x,p.y);return q.x<-1e-6||q.y<-1e-6||q.x>P.L+1e-6||q.y>P.B+1e-6;});
+  for(const f of fs){const out=geoLocal(f).posts.filter(p=>{const q=toW(f,p.x,p.y);return !imPlatz(q.x,q.y);});
     if(out.length)add(`postout:${f.id}`,'hinweis',f,`${f.name}: ${out.length} ${out.length>1?'Einbauteile liegen':'Einbauteil liegt'} ausserhalb des Platzes (${[...new Set(out.map(p=>p.label))].join(', ')}).`);}
   // gleiche Linienfarbe bei überlagerten Ballspielfeldern verschiedener Sportarten
   const box=f=>{const b=geoLocal(f).outline,cs=[[b.x0,b.y0],[b.x1,b.y0],[b.x1,b.y1],[b.x0,b.y1]].map(p=>toW(f,p[0],p[1]));return {x0:Math.min(...cs.map(p=>p.x)),x1:Math.max(...cs.map(p=>p.x)),y0:Math.min(...cs.map(p=>p.y)),y1:Math.max(...cs.map(p=>p.y))};};
@@ -185,4 +215,4 @@ function quantities(){
 function allPosts(){const out=[];for(const {f,w} of computeAll())w.posts.forEach(p=>out.push({f,label:p.label,x:p.x,y:p.y}));return out;}
 function safetyPoly(f){const b=geoLocal(f).outline,sz=szOf(f);return [[b.x0-sz.stirn,b.y0-sz.laengs],[b.x1+sz.stirn2,b.y0-sz.laengs],[b.x1+sz.stirn2,b.y1+sz.laengs],[b.x0-sz.stirn,b.y1+sz.laengs]].map(p=>toW(f,p[0],p[1]));}
 
-export { PRIO_MAX, newId, uniqueName, nextPrio,stufeOf, szOf, szSeite, szText, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, stateKey, sides, LV, LVNAME, getWarnings, markName, quantities, allPosts, safetyPoly };
+export { hatRand, randPunkte, imPlatz, PRIO_MAX, newId,uniqueName, nextPrio,stufeOf, szOf, szSeite, szText, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, stateKey, sides, LV, LVNAME, getWarnings, markName, quantities, allPosts, safetyPoly };
