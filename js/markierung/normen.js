@@ -617,18 +617,23 @@ const NORM={
       g.outline={x0,y0:-lw,x1,y1:W};g.labelAt={x:(x0+x1)/2,y:W+0.9};
       return shiftG(g,-(x0+x1)/2,-(W-lw)/2);
     }},
-  weitsprung:{name:'Weitsprung',gruppe:'Leichtathletik',quelle:'SO Deutschland 2016 (Absprungzone)',farbeEmpf:'weiss',defColor:'weiss',lw:0.05,sized:false,
+  weitsprung:{name:'Weitsprung',gruppe:'Leichtathletik',quelle:'Swiss Athletics, Datenblatt Weit- und Dreisprung (8.1.2026)',farbeEmpf:'weiss',defColor:'weiss',lw:0.05,sized:false,
     stufen:[{id:'std',name:'mit Absprungzone',sz:{stirn:0,laengs:0}}],
     opts:[
       {k:'bahnen',l:'Anzahl Anlaufbahnen',t:'num',min:1,max:6,step:1,def:1,int:true},
       {k:'achs',l:'Achsabstand der Bahnen',u:'m',t:'num',min:1.27,max:10,step:0.01,def:1.27,if:o=>o.bahnen>1},
       {k:'grube',l:'Sprunggrube',t:'select',def:0,options:[[0,'eine gemeinsame Grube'],[1,'je Bahn eine Grube']],if:o=>o.bahnen>1},
-      {k:'anlauf',l:'Anlauf bis Absprung',u:'m',t:'num',min:5,max:60,step:0.5,def:30},
+      {k:'anlauf',l:'Anlauf bis Absprung',u:'m',t:'num',min:5,max:60,step:0.5,def:40},
       {k:'balken',l:'Balken bis Grube',u:'m',t:'num',min:0,max:5,step:0.05,def:1},
-      {k:'grubeL',l:'Grube Länge',u:'m',t:'num',min:2,max:12,step:0.25,def:8},
+      {k:'grubeL',l:'Grube Länge',u:'m',t:'num',min:2,max:12,step:0.25,def:9},
       {k:'grubeB',l:'Grube Breite (je Bahn)',u:'m',t:'num',min:1,max:5,step:0.25,def:3},
       {k:'rand',l:'Seitenlinien am Anlauf',t:'bool',def:true},
-      {k:'zone',l:'Absprungzone 80 cm',t:'bool',def:true},
+      {k:'zone',l:'Absprungzone 80 cm (U14 und jünger)',t:'bool',def:true},
+      {k:'drei',l:'Dreisprung-Absprunglinien (aufgemalt, 20 cm)',t:'bool',def:false},
+      {k:'drei7',l:'Dreisprung 7 m vor der Grube',t:'bool',def:true,if:o=>o.drei},
+      {k:'drei9',l:'Dreisprung 9 m vor der Grube',t:'bool',def:true,if:o=>o.drei},
+      {k:'drei11',l:'Dreisprung 11 m vor der Grube',t:'bool',def:true,if:o=>o.drei},
+      {k:'drei13',l:'Dreisprung 13 m vor der Grube',t:'bool',def:true,if:o=>o.drei},
       {k:'snr',l:'Startzahlen am Anlaufbeginn',t:'bool',def:false},
       {k:'snrZgr',l:'Höhe der Startzahlen',u:'m',t:'num',min:0.2,max:1.2,step:0.01,def:0.5,if:o=>o.snr},
       {k:'snrAbst',l:'Abstand Anlaufbeginn – Zahl',u:'m',t:'num',min:0,max:10,step:0.01,def:0.3,if:o=>o.snr},
@@ -660,6 +665,14 @@ const NORM={
         g.objs.push({shape:'rect',x:-0.2,y:y0,w:0.2,h:W,fill:'#f4f4f4',stroke:'#8a8a8a',label:'Absprungbalken'});
         if(o.zone){Ln(g,-0.475,y0,-0.475,y0+W,lw);Ln(g,0.325,y0,0.325,y0+W,lw);}
         if(n>1)g.notes.push({x:xr0+vorne+1.2,y:ax(k),t:'Bahn '+(k+1),size:0.4});}
+      // Dreisprung: aufgemalte Absprunglinien, 20 cm breit wie der Balken; Absprunglinie = Kante zur Grube,
+      // d m vor der Grube (Swiss Athletics, Datenblatt Weit- und Dreisprung, Kap. 1.2 und Abbildung)
+      const DS=o.drei?[7,9,11,13].filter(d=>o['drei'+d]):[];
+      for(const d of DS){const x=bk-d;
+        if(x-0.2<xr0-1e-9){g.hints.push({k:'drei'+d,t:`Dreisprunglinie ${d} m liegt ausserhalb des Anlaufs.`});continue;}
+        for(let k=0;k<n;k++)Ln(g,x-0.1,ax(k)-W/2,x-0.1,ax(k)+W/2,0.2);
+        g.notes.push({x:x-0.75,y:ax(0),t:`${d} m`,size:0.35});}
+      if(o.drei&&o.drei13&&13+gL<21-1e-9)g.warns.push({k:'drei21',t:`Dreisprunglinie 13 m bis Grubenende ${f2(13+gL)} m (Swiss Athletics: mindestens 21 m).`});
       // Anlaufmetrierung: jeder Meter ein kurzer Strich, alle 5 m ein langer Strich mit Zahl,
       // gemessen ab Vorderkante Absprungbalken (x = 0). Striche an der Aussen- oder Innenseite
       // der äusseren Seitenlinien; Zahlen lesbar in Laufrichtung (Kopf zur Grube).
@@ -697,9 +710,16 @@ const NORM={
         DL(g,xr0,topEdge,0,topEdge,0,-1.3);DL(g,0,topEdge,bk,topEdge,0,-1.3);
         DL(g,xr0+vorne+0.8,ax(0)-W/2,xr0+vorne+0.8,ax(0)+W/2,0,0,'1.22');if(n>1)DL(g,xr0+vorne+2.5,ax(0),xr0+vorne+2.5,ax(1),0,0);
         if(o.snr&&sa>0)DL(g,xr0,ax(0)+W/2+lw,xr0+sa,ax(0)+W/2+lw,0,0.5);
-        if(o.zone)DL(g,-0.5,ax(0)+W/2,0.3,ax(0)+W/2,0,0.5,'0.80');}
-      if(bk<1-1e-9)g.warns.push('Abstand Balken – Grube unter 1.00 m (Regelwerk: mindestens 1.00 m).');
-      g.hints.push('Anlauflänge und Grube sind noch nicht belegt (Annahme).');
+        if(o.zone)DL(g,-0.5,ax(0)+W/2,0.3,ax(0)+W/2,0,0.5,'0.80');
+        // Dreisprung: Masskette Absprunglinien bis Grube
+        const dp=DS.map(d=>bk-d).filter(x=>x-0.2>=xr0-1e-9).sort((a,b)=>a-b);
+        if(dp.length){dp.push(bk);for(let i=0;i<dp.length-1;i++)DL(g,dp[i],topEdge,dp[i+1],topEdge,0,-2.6);}}
+      // Prüfungen nach Swiss Athletics, Datenblatt Weit- und Dreisprung (8.1.2026), Abbildung Seite 1 und Kap. 1.1
+      if(bk<1-1e-9||bk>3+1e-9)g.warns.push(`Abstand Balken – Grube ${f2(bk)} m (Swiss Athletics: 1.00 bis 3.00 m).`);
+      if(+o.anlauf<40-1e-9)g.warns.push({k:'anlauf',t:`Anlauf ${num(+o.anlauf)} m (Swiss Athletics: mindestens 40 m).`});
+      if(bk+gL<10-1e-9)g.warns.push({k:'grubenende',t:`Absprunglinie bis Grubenende ${f2(bk+gL)} m (Swiss Athletics: mindestens 10 m).`});
+      if(gB<2.75-1e-9||gB>3+1e-9)g.warns.push({k:'grubeB',t:`Grubenbreite ${f2(gB)} m${n>1&&+o.grube===1?' je Bahn':''} (Swiss Athletics: 2.75 bis 3.00 m).`});
+      if(n>1&&+o.grube!==1)g.hints.push({k:'band',t:'Gemeinsame Grube: Im Wettkampf die Grube mit einem Band auf die benutzte Bahn abgrenzen, weil die Bahnachse nicht in der Grubenmitte liegt (Swiss Athletics, Kap. 1.1).'});
       // Fester Punkt beim Ändern der Optionen: Vorderkante Grube auf der Achse von Bahn 1
       g.anchor={x:bk,y:ax(0)};
       // Anlauf beginnt genau bei xr0 und endet an der Grube (bboxOf rechnet die Linienenden 2.5 cm zu weit)

@@ -140,8 +140,10 @@ function getWarnings(){
     if(ov.length)add(`out:${f.id}`,'hoch',f,`${f.name}: ragt über den Platzrand (${ov.map(([k,v])=>`${k} ${f2(v)} m`).join(', ')}).`);
     for(const sd of sides(f)){const req=szSeite(sz,sd);
       if(req>0&&sd.avail>=-0.005&&sd.avail<req-0.005)add(`sz:${f.id}:${sd.id}`,'hoch',f,`${f.name}: Sicherheitszone ${sd.name} nur ${f2(Math.max(0,sd.avail))} m statt ${f2(req)} m.`);}
-    g.warns.forEach((t,i)=>add(`gw:${f.id}:${i}`,'warnung',f,`${f.name}: ${t}`));
-    g.hints.forEach((t,i)=>add(`gh:${f.id}:${i}`,'hinweis',f,`${f.name}: ${t}`));
+    // Meldungen als Text (Schlüssel = Nummer) oder als {k,t} mit festem Schlüssel, damit Bestätigungen nicht verrutschen
+    // (Nummern zählen nur die Meldungen ohne festen Schlüssel)
+    for(const [arr,p,lv] of [[g.warns,'gw','warnung'],[g.hints,'gh','hinweis']]){let i=0;
+      for(const t of arr)add(`${p}:${f.id}:${typeof t==='object'?t.k:i++}`,lv,f,`${f.name}: ${typeof t==='object'?t.t:t}`);}
     if(st.hint)add(`sh:${f.id}`,'hinweis',f,`${f.name}: ${st.hint}`);
     if(lowContrast(COLOR[f.color].hex,BELAG[P.belag].hex))add(`kon:${f.id}`,'hinweis',f,`${f.name}: ${COLOR[f.color].name} hat wenig Kontrast zum Belag (${BELAG[P.belag].name}).`);
   }

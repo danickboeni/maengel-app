@@ -202,7 +202,12 @@ const stufeMass=s=>s.L?(s.Lmin!=null?`${num(s.L)} × ${num(s.B)} m (Bandbreite $
 function fillAddStufen(){const N=NORM[$('#addSport').value];$('#addStufe').innerHTML=N.stufen.map(s=>`<option value="${s.id}">${esc(s.name)}${s.L?` – ${stufeMass(s)}`:''}</option>`).join('');updateAddInfo();}
 function updateAddInfo(){const N=NORM[$('#addSport').value],st=N.stufen.find(s=>s.id===$('#addStufe').value)||N.stufen[0];
   $('#addInfo').innerHTML=`Quelle: ${esc(N.quelle)}<br>Linien: ${num(N.lw*100)} cm, ${esc(N.farbeEmpf)}${(st.sz.stirn||st.sz.laengs)?`<br>Sicherheitszone: ${szText({stirn:st.sz.stirn,laengs:st.sz.laengs,stirn2:st.sz.stirn2!=null?st.sz.stirn2:st.sz.stirn})}`:''}`;}
-function addField(){const P=state.platz,f=makeField($('#addSport').value,$('#addStufe').value,Math.round(P.L/2*10)/10,Math.round(P.B/2*10)/10,0);state.fields.push(f);sel=f.id;setTab('props');commit();renderProps();}
+function addField(){const P=state.platz,f=makeField($('#addSport').value,$('#addStufe').value,Math.round(P.L/2*10)/10,Math.round(P.B/2*10)/10,0);
+  // Feld in der Platzmitte; liegt der Teil, der auf den Platz muss, nicht ganz drauf (z. B. Weitsprung-Anlauf), so weit wie nötig verschieben
+  const g=geoLocal(f),b=g.platzBox||g.outline;
+  for(const [k,a0,a1,max] of [['x',b.x0,b.x1,P.L],['y',b.y0,b.y1,P.B]]){const lo=f[k]+a0,hi=f[k]+a1;
+    if(hi-lo<=max){if(lo<0)f[k]=Math.ceil((f[k]-lo)*100)/100;else if(hi>max)f[k]=Math.floor((f[k]-(hi-max))*100)/100;}}
+  state.fields.push(f);sel=f.id;setTab('props');commit();renderProps();}
 // Fester Punkt eines Felds (z. B. Weitsprung: Vorderkante Grube). Beim Ändern der Optionen
 // wird das Feld so nachgeschoben, dass dieser Punkt auf dem Platz an Ort und Stelle bleibt.
 function ankerWelt(f){const a=geoLocal(f).anchor;return a?toW(f,a.x,a.y):null;}
