@@ -7,21 +7,54 @@ export const EINHEITEN={mm:0.001,cm:0.01,m:1};
 const INSUNITS={4:'mm',5:'cm',6:'m'};
 const MAX_PUNKTE=300000;
 
-/* ================= Datei → Text ================= */
-export function dxfText(buf){
+/* ================= Datei → Gruppen (Code, Wert) ================= */
+// ASCII-DXF und binäres DXF ergeben dieselbe Liste von Objekten {t: Typ, c: Codes, v: Werte als Text}
+export function dxfObjekte(buf){
   const b=new Uint8Array(buf),kopf=new TextDecoder('latin1').decode(b.subarray(0,24));
   if(/^AC10\d\d/.test(kopf))throw new Error('Das ist eine DWG-Datei. Bitte zuerst als DXF speichern (z. B. mit dem ODA File Converter).');
-  if(kopf.startsWith('AutoCAD Binary DXF'))throw new Error('Binäres DXF wird nicht unterstützt. Bitte als ASCII-DXF speichern.');
-  try{return new TextDecoder('utf-8',{fatal:true}).decode(b);}catch(_){return new TextDecoder('windows-1252').decode(b);}
+  const objs=[];let cur=null;
+  const gruppe=(c,v)=>{if(c===0){cur={t:v,c:[],v:[]};objs.push(cur);}else if(cur){cur.c.push(c);cur.v.push(v);}};
+  if(kopf.startsWith('AutoCAD Binary DXF'))binaerLesen(b,gruppe);
+  else{let text;try{text=new TextDecoder('utf-8',{fatal:true}).decode(b);}catch(_){text=new TextDecoder('windows-1252').decode(b);}
+    const z=text.split(/\r\n|\n|\r/);
+    for(let i=0;i+1<z.length;i+=2){const c=parseInt(z[i],10);if(isNaN(c))continue;gruppe(c,z[i+1].trim());}}
+  if(!objs.some(o=>o.t==='SECTION'))throw new Error('Keine gültige DXF-Datei.');
+  return objs;
+}
+// Binäres DXF: nach dem Kopf (22 Bytes) Gruppencode (ab R13: 2 Bytes, vorher 1 Byte), dann der Wert je nach Code
+function binaerTyp(c){
+  if(c<10)return 's';if(c<60)return 'd';if(c<80)return 'i2';if(c<90)return null;if(c<100)return 'i4';if(c<110)return 's';
+  if(c<150)return 'd';if(c<160)return null;if(c<170)return 'i8';if(c<180)return 'i2';if(c<210)return null;if(c<240)return 'd';
+  if(c<270)return null;if(c<290)return 'i2';if(c<300)return 'b1';if(c<310)return 's';if(c<320)return 'bin';if(c<370)return 's';
+  if(c<390)return 'i2';if(c<400)return 's';if(c<410)return 'i2';if(c<420)return 's';if(c<430)return 'i4';if(c<440)return 's';
+  if(c<460)return 'i4';if(c<470)return 'd';if(c<482)return 's';if(c===999)return 's';if(c<1000)return null;
+  if(c===1004)return 'bin';if(c<1010)return 's';if(c<1060)return 'd';if(c<1071)return 'i2';if(c===1071)return 'i4';return null;
+}
+function binaerLesen(b,gruppe){
+  const dv=new DataView(b.buffer,b.byteOffset,b.byteLength),zwei=b[22]===0&&b[23]===0;
+  let td=new TextDecoder('utf-8'),i=22;
+  while(i<b.length){
+    let c;if(zwei){c=dv.getInt16(i,true);i+=2;}else{c=b[i++];if(c===255){c=dv.getInt16(i,true);i+=2;}}
+    const t=binaerTyp(c);let v;
+    if(t==='s'){let j=i;while(j<b.length&&b[j]!==0)j++;v=td.decode(b.subarray(i,j)).trim();i=j+1;}
+    else if(t==='d'){v=String(dv.getFloat64(i,true));i+=8;}
+    else if(t==='i2'){v=String(dv.getInt16(i,true));i+=2;}
+    else if(t==='i4'){v=String(dv.getInt32(i,true));i+=4;}
+    else if(t==='i8'){v=String(dv.getBigInt64(i,true));i+=8;}
+    else if(t==='b1'){v=String(b[i]);i+=1;}
+    else if(t==='bin'){i+=1+b[i];v='';}
+    else throw new Error(`Binäres DXF: unbekannter Gruppencode ${c}. Bitte als ASCII-DXF speichern.`);
+    if(i>b.length)throw new Error('Binäres DXF ist unvollständig.');
+    gruppe(c,v);
+    // ältere Dateien (vor AutoCAD 2007) sind nicht UTF-8 kodiert
+    if(c===1&&v&&/^AC10(0\d|1[0-8])$/.test(v))td=new TextDecoder('windows-1252');
+    if(c===0&&v==='EOF')break;
+  }
 }
 
 /* ================= DXF lesen ================= */
 // Ergebnis: Linienzüge in Zeichnungseinheiten (y nach oben), Ebenen, Einheit laut Datei
-function dxfRoh(text){
-  const z=text.split(/\r\n|\n|\r/),objs=[];let cur=null;
-  for(let i=0;i+1<z.length;i+=2){const c=parseInt(z[i],10);if(isNaN(c))continue;const v=z[i+1].trim();
-    if(c===0){cur={t:v,c:[],v:[]};objs.push(cur);}else if(cur){cur.c.push(c);cur.v.push(v);}}
-  if(!objs.some(o=>o.t==='SECTION'))throw new Error('Keine gültige DXF-Datei.');
+function dxfRoh(objs){
   let sec=null,einheit=null,block=null;const ebenen=new Map(),bloecke=new Map(),ents=[];
   for(const o of objs){
     if(o.t==='SECTION'){sec=wert(o,2);
@@ -51,11 +84,13 @@ function bulge(x1,y1,x2,y2,b,tol){
   const p=bogen(cx,cy,Math.abs(r),Math.atan2(y1-cy,x1-cx),th,tol);p[p.length-2]=x2;p[p.length-1]=y2;return p.slice(2);
 }
 // NURBS nach de Boor
-function spline(o,tol){
-  const deg=zahl(o,71,3),kn=alle(o,40),xs=alle(o,10),ys=alle(o,20),ws=alle(o,41),fx=alle(o,11),fy=alle(o,21);
+function spline(o,tol){return nurbs(zahl(o,71,3),alle(o,40),alle(o,10),alle(o,20),alle(o,41),alle(o,11),alle(o,21),tol);}
+function nurbs(deg,kn,xs,ys,ws,fx,fy,tol){
   const n=Math.min(xs.length,ys.length);
   if(n<deg+1||kn.length!==n+deg+1){const m=Math.min(fx.length,fy.length);if(m>=2){const p=[];for(let i=0;i<m;i++)p.push(fx[i],fy[i]);return p;}const p=[];for(let i=0;i<n;i++)p.push(xs[i],ys[i]);return p;}
-  const W=ws.length===n?ws:new Array(n).fill(1),u0=kn[deg],u1=kn[n],N=Math.min(2000,Math.max(8,n*12)),p=[];
+  // Anzahl Punkte nach Länge des Kontrollpolygons: etwa alle 40 × Toleranz ein Punkt (bei 5 mm: 20 cm)
+  let lcp=0;for(let i=1;i<n;i++)lcp+=Math.hypot(xs[i]-xs[i-1],ys[i]-ys[i-1]);
+  const W=ws.length===n?ws:new Array(n).fill(1),u0=kn[deg],u1=kn[n],N=Math.min(400,Math.max(4*deg,n,Math.ceil(lcp/(tol*40)))),p=[];
   for(let s=0;s<=N;s++){const u=u0+(u1-u0)*s/N;let k=deg;while(k<n-1&&u>=kn[k+1])k++;
     const d=[];for(let j=0;j<=deg;j++){const i=k-deg+j,w=W[i];d.push([xs[i]*w,ys[i]*w,w]);}
     for(let r=1;r<=deg;r++)for(let j=deg;j>=r;j--){const i=k-deg+j,den=kn[i+deg-r+1]-kn[i],a=den>1e-12?(u-kn[i])/den:0;
@@ -63,9 +98,45 @@ function spline(o,tol){
     p.push(d[deg][0]/d[deg][2],d[deg][1]/d[deg][2]);}
   return p;
 }
+// Schraffur (HATCH): nur die Randlinien, als geschlossene Züge. Die Werte stehen der Reihe nach,
+// daher wird fortlaufend gelesen (gleiche Codes kommen mehrmals vor).
+function schraffur(o,tol){
+  const C=o.c,V=o.v,N=C.length,out=[];let k=C.indexOf(91);if(k<0)return out;
+  const np=parseInt(V[k],10)||0;k++;
+  const nimm=c=>{while(k<N&&C[k]!==c)k++;if(k>=N)return NaN;return parseFloat(V[k++]);};
+  for(let pf=0;pf<np&&k<N;pf++){
+    const typ=nimm(92);if(isNaN(typ))break;const p=[];
+    if(typ&2){   // Polylinie mit Ausbuchtungen
+      let mitB=0;while(k<N&&C[k]!==93){if(C[k]===72)mitB=parseInt(V[k],10);k++;}
+      const nv=nimm(93),v=[];
+      for(let i=0;i<nv&&k<N;i++){const x=nimm(10),y=nimm(20);let b=0;if(mitB&&C[k]===42)b=parseFloat(V[k++])||0;v.push({x,y,b});}
+      if(v.length>=2){p.push(v[0].x,v[0].y);for(let i=0;i<v.length;i++){const a=v[i],b=v[(i+1)%v.length];p.push(...bulge(a.x,a.y,b.x,b.y,a.b,tol));}p.length-=2;}
+    }else{       // Kanten: 1 Linie, 2 Kreisbogen, 3 Ellipsenbogen, 4 Spline
+      const ne=nimm(93);
+      for(let e=0;e<ne&&k<N;e++){const et=nimm(72);
+        if(et===1)p.push(nimm(10),nimm(20),nimm(11),nimm(21));
+        else if(et===2||et===3){const cx=nimm(10),cy=nimm(20);let mx=0,my=0;if(et===3){mx=nimm(11);my=nimm(21);}
+          const r=nimm(40),a0=nimm(50),a1=nimm(51),ccw=nimm(73);
+          // gegen den Uhrzeigersinn: von a0 nach a1; im Uhrzeigersinn sind die Winkel gespiegelt gespeichert
+          let sw=a1-a0;while(sw<=0)sw+=360;while(sw>360)sw-=360;const st=ccw?rad(a0):-rad(a0),swr=ccw?rad(sw):-rad(sw);
+          if(et===2)p.push(...bogen(cx,cy,r,st,swr,tol));
+          else{const R=Math.hypot(mx,my),n=Math.max(4,Math.min(256,Math.ceil(Math.abs(swr)/(R>tol?2*Math.acos(Math.max(-1,1-tol/R)):TAU/8))));
+            for(let i=0;i<=n;i++){const t=st+swr*i/n,c=Math.cos(t),s=Math.sin(t);p.push(cx+mx*c-r*my*s,cy+my*c+r*mx*s);}}}
+        else if(et===4){const dg=nimm(94);nimm(73);nimm(74);const nk=nimm(95),nc=nimm(96),kn=[],xs=[],ys=[],ws=[];
+          for(let i=0;i<nk;i++)kn.push(nimm(40));
+          for(let i=0;i<nc;i++){xs.push(nimm(10));ys.push(nimm(20));if(C[k]===42)ws.push(parseFloat(V[k++]));}
+          p.push(...nurbs(dg,kn,xs,ys,ws.length===nc?ws:[],[],[],tol));}
+        else break;}
+    }
+    if(p.length>=6&&p.every(isFinite))out.push(p);
+    // Quellobjekte (97, 330) überspringen bis zur nächsten Randlinie
+  }
+  return out;
+}
 
-export function dxfLesen(text,name){
-  const R=dxfRoh(text),tol0=R.einheit?0.005/EINHEITEN[R.einheit]:null,out=[];let punkte=0,gekuerzt=false;
+// buf: Inhalt der Datei (ArrayBuffer), ASCII- oder binäres DXF
+export function dxfLesen(buf,name){
+  const R=dxfRoh(dxfObjekte(buf)),tol0=R.einheit?0.005/EINHEITEN[R.einheit]:null,out=[];let punkte=0,gekuerzt=false;
   // Toleranz ohne Einheitsangabe: aus der Grösse der Zeichnung (erste grobe Schätzung über alle Koordinaten)
   let tol=tol0;
   if(tol==null){let mi=Infinity,ma=-Infinity;for(const o of R.ents)for(let i=0;i<o.c.length;i++)if(o.c[i]===10||o.c[i]===20){const v=parseFloat(o.v[i]);if(isFinite(v)){mi=Math.min(mi,v);ma=Math.max(ma,v);}}
@@ -93,13 +164,16 @@ export function dxfLesen(text,name){
         for(;k<list.length&&list[k].t!=='SEQEND';k++){const q=list[k];if(q.t==='VERTEX'&&!(zahl(q,70)&(16|128)))v.push({x:zahl(q,10),y:zahl(q,20),b:zahl(q,42)});}
         j=k;if(!(fl&(16|64)))zug(eb,v,(fl&1)===1,fl&8?M:ocs);}
       else if(t==='SPLINE')dazu(eb,false,spline(o,tol),M);
+      else if(t==='HATCH'||t==='MPOLYGON')for(const p of schraffur(o,tol))dazu(eb,true,p,ocs);
+      else if(t==='SOLID'||t==='TRACE'){const p=[zahl(o,10),zahl(o,20),zahl(o,11),zahl(o,21),zahl(o,13),zahl(o,23),zahl(o,12),zahl(o,22)];   // Ecken 1, 2, 4, 3
+        if(p[4]===p[6]&&p[5]===p[7])p.length=6;dazu(eb,true,p,ocs);}
       else if(t==='INSERT'&&tiefe<8){const b=R.bloecke.get(wert(o,2));if(!b)continue;
         const sx=zahl(o,41,1),sy=zahl(o,42,1),a=rad(zahl(o,50)),c=Math.cos(a),s=Math.sin(a),nc=Math.max(1,zahl(o,70,1)),nr=Math.max(1,zahl(o,71,1)),dc=zahl(o,44),dr=zahl(o,45);
         for(let ci=0;ci<nc;ci++)for(let ri=0;ri<nr;ri++){
           const px=zahl(o,10)+c*ci*dc-s*ri*dr,py=zahl(o,20)+s*ci*dc+c*ri*dr;
           const T=[c*sx,s*sx,-s*sy,c*sy,px-(c*sx*b.bx-s*sy*b.by),py-(s*sx*b.bx+c*sy*b.by)];
           bearbeite(b.ents,mal(ocs,T),eb,tiefe+1);}}
-      // TEXT, MTEXT, HATCH, DIMENSION, POINT usw. werden nicht übernommen
+      // TEXT, MTEXT, DIMENSION, POINT, Bilder usw. werden nicht übernommen; von Schraffuren nur der Rand
     }
   }
   function zug(eb,v,zu,M){if(v.length<2)return;const p=[v[0].x,v[0].y];
@@ -121,7 +195,8 @@ function geoAusRoh(out,R,name,gekuerzt){
     for(let i=0;i<o.p.length;i+=2){const X=Math.round((o.p[i]-x0)/q),Y=Math.round((y1-o.p[i+1])/q);if(X===lx&&Y===ly)continue;p.push(X,Y);lx=X;ly=Y;}
     if(o.z&&p.length>=4&&p[0]===p[p.length-2]&&p[1]===p[p.length-1])p.length-=2;
     if(p.length>=4)polys.push({e,z:o.z?1:0,p});}
-  const aus=namen.filter(n=>R.ebenen.has(n)&&!R.ebenen.get(n).an);
+  // im CAD ausgeschaltete oder gefrorene Ebenen und «Defpoints» (wird nie gedruckt) zu Beginn aus
+  const aus=namen.filter(n=>(R.ebenen.has(n)&&!R.ebenen.get(n).an)||n.toLowerCase()==='defpoints');
   return {v:1,name,datei:R.einheit,einheit:vorschlag,q,w:Math.round((x1-x0)/q),h:Math.round((y1-y0)/q),ebenen:namen,aus,polys,gekuerzt};
 }
 
@@ -173,6 +248,20 @@ export function naechsterPunkt(geo,lage,X,Y,tol){
   const m=meter(geo,lage.einheit),vis=sichtbar(geo,lage),p=zuZeichnung(lage,X,Y);let best=null;
   m.polys.forEach((a,pi)=>{if(!vis[geo.polys[pi].e])return;for(let i=0;i<a.length;i+=2){const d=Math.hypot(a[i]-p.x,a[i+1]-p.y);if(d<=tol&&(!best||d<best.d))best={d,x:a[i],y:a[i+1]};}});
   return best?{d:best.d,...zuWelt(lage,best.x,best.y)}:null;
+}
+// Platzrand wählen, in dieser Reihenfolge: geschlossene Linie beim Punkt, kleinste geschlossene Linie um den Punkt,
+// offene Linie beim Punkt (wird später zu einem Ring verbunden). Ergebnis {pi, zu} oder null
+export function randWahl(geo,lage,X,Y,tol){
+  const m=meter(geo,lage.einheit),vis=sichtbar(geo,lage),p=zuZeichnung(lage,X,Y);let offen=null,zu=null;
+  m.polys.forEach((a,pi)=>{const g=geo.polys[pi];if(!vis[g.e])return;const n=a.length/2,segs=g.z?n:n-1;let d=Infinity;
+    for(let i=0;i<segs;i++){const j=(i+1)%n;d=Math.min(d,segAbst(p.x,p.y,a[2*i],a[2*i+1],a[2*j],a[2*j+1]).d);}
+    if(d>tol)return;if(g.z){if(!zu||d<zu.d)zu={pi,d};}else if(!offen||d<offen.d)offen={pi,d};});
+  if(zu)return {pi:zu.pi,zu:true};
+  let best=null;
+  m.polys.forEach((a,pi)=>{const g=geo.polys[pi];if(!g.z||!vis[g.e])return;const n=a.length/2;let drin=false,fl=0;
+    for(let i=0,j=n-1;i<n;j=i++){const xi=a[2*i],yi=a[2*i+1],xj=a[2*j],yj=a[2*j+1];if((yi>p.y)!==(yj>p.y)&&p.x<(xj-xi)*(p.y-yi)/(yj-yi)+xi)drin=!drin;fl+=xj*yi-xi*yj;}
+    fl=Math.abs(fl)/2;if(drin&&fl>1&&(!best||fl<best.fl))best={pi,fl};});
+  return best?{pi:best.pi,zu:true}:offen?{pi:offen.pi,zu:false}:null;
 }
 // Linienzug als Welt-Punkte (zum Hervorheben)
 export function zugPunkte(geo,lage,pi){const m=meter(geo,lage.einheit),a=m.polys[pi],r=[];for(let i=0;i<a.length;i+=2)r.push(zuWelt(lage,a[i],a[i+1]));return {pts:r,zu:!!geo.polys[pi].z};}

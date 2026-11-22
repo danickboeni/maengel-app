@@ -5,7 +5,7 @@ import { COLORS, COLOR, BELAEGE, BELAG, NORM } from './normen.js';
 import { state, setState, settings, PRIO_MAX, newId,uniqueName, stufeOf, szOf, szSeite, szText, makeField, byId, geoCache, geoLocal, trig, toW, toL, computeAll, sides, LVNAME, getWarnings, quantities, allPosts, hatRand } from './pruefung.js';
 import { grundSVG, contentSVG, platzOutline, planExtents, planSVG } from './zeichnen.js';
 import { csvCell, buildCSV, buildDXF, printOpts, updatePrintInfo, buildPrint, doPrint, setUnterlageDruck } from './druck.js';
-import { EINHEITEN, dxfText, dxfLesen, geoGueltig, unterlageSVG, zeichnungsGroesse, zuWelt, naechsteKante, naechsterPunkt, zugPunkte, geschlossenerZug } from './unterlage.js';
+import { EINHEITEN, dxfLesen,geoGueltig, unterlageSVG, zeichnungsGroesse, zuWelt, naechsteKante, naechsterPunkt, zugPunkte, geschlossenerZug, randWahl } from './unterlage.js';
 const $=s=>document.querySelector(s);
 
 /* ================= Zustand ================= */
@@ -299,7 +299,7 @@ function renderUnterlage(){
 }
 async function dxfLaden(file){
   meldung('DXF wird gelesen …');await new Promise(r=>setTimeout(r,30));
-  let geo;try{geo=dxfLesen(dxfText(await file.arrayBuffer()),file.name);}catch(err){meldung('DXF konnte nicht gelesen werden: '+(err&&err.message||err));return;}
+  let geo;try{geo=dxfLesen(await file.arrayBuffer(),file.name);}catch(err){meldung('DXF konnte nicht gelesen werden: '+(err&&err.message||err));return;}
   const g=zeichnungsGroesse(geo,geo.einheit),P=state.platz,alt=state.unterlage;
   uGeo=geo;
   // gleiche Lage behalten, wenn eine Unterlage neu geladen wird; sonst Zeichnung auf die Platzmitte
@@ -363,7 +363,7 @@ function unterlageDrehen(U,d,pv){const a=rad(d),c=Math.cos(a),s=Math.sin(a),dx=U
 const MODUS_TEXT={
   kante:'Ausrichten 1/2: Kante der Unterlage anklicken, die gerade werden soll (waagrecht oder senkrecht).',
   punkt:'Ausrichten 2/2: Punkt der Unterlage anklicken, der auf die Platzecke oben links kommt.',
-  rand:'Platzrand in der Unterlage anklicken (geschlossene Linie oder Linien, die sich treffen).'};
+  rand:'Platzrand anklicken oder in die Platzfläche klicken (gelb = Vorschau). Mehrere Linien übereinander: störende Ebenen ausblenden.'};
 function modusStart(m){
   if(!uGeo||!state.unterlage)return;
   if(state.unterlage.sicht===false){state.unterlage.sicht=true;commit();}
@@ -376,7 +376,7 @@ function modusSuchen(w){
   const U=state.unterlage,tol=12/view.s;if(!U||!uGeo)return null;
   if(modus==='kante')return naechsteKante(uGeo,U,w.x,w.y,tol);
   if(modus==='punkt')return naechsterPunkt(uGeo,U,w.x,w.y,tol);
-  if(modus==='rand'){const k=naechsteKante(uGeo,U,w.x,w.y,tol);return k?{pi:k.pi,...zugPunkte(uGeo,U,k.pi)}:null;}
+  if(modus==='rand'){const k=randWahl(uGeo,U,w.x,w.y,tol);return k?{pi:k.pi,...zugPunkte(uGeo,U,k.pi)}:null;}
   return null;
 }
 function modusKlick(w){
@@ -387,7 +387,7 @@ function modusKlick(w){
   if(modus==='punkt'){const p=h?{x:h.x,y:h.y}:w;U.tx=+(U.tx-p.x).toFixed(4);U.ty=+(U.ty-p.y).toFixed(4);
     modusEnde();commit();meldung(h?'Unterlage ausgerichtet.':'Unterlage ausgerichtet (frei geklickter Punkt, kein Linienende in der Nähe).');return;}
   if(modus==='rand'){if(!h){meldung('Keine Linie getroffen. Näher an den Platzrand klicken.');return;}
-    const pts=geschlossenerZug(uGeo,U,h.pi);
+    const pts=h.zu?h.pts:geschlossenerZug(uGeo,U,h.pi);
     if(!pts){meldung('Daraus ergibt sich keine geschlossene Linie. Andere Linie anklicken oder störende Ebenen ausblenden.');return;}
     modusEnde();randUebernehmen(pts);}
 }
