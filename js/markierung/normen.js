@@ -223,26 +223,37 @@ const NORM={
       g.outline={x0:0,y0:0,x1:L,y1:B};g.labelAt={x:L/2,y:B-1.4};
       return shiftG(g,-L/2,-cy);
     }},
-  unihockey:{name:'Unihockey',gruppe:'Ballspiele',quelle:'BASPO 801',farbeEmpf:'frei',defColor:'blau',lw:0.05,sized:true,lineRef:'Aussenmass (Linien innerhalb)',
+  unihockey:{name:'Unihockey',gruppe:'Ballspiele',quelle:'swiss unihockey, Spielregeln SPR (Stand 1. November 2026)',farbeEmpf:'frei',defColor:'blau',lw:0.05,sized:true,lineRef:'Aussenmass (Linien innerhalb)',
     stufen:[
-      {id:'gross',name:'Grossfeld',L:40,B:20,sz:{stirn:0.5,laengs:0.5},lm:230},
-      {id:'klein',name:'Kleinfeld',L:24,B:14,sz:{stirn:0.5,laengs:0.5},hint:'Kleinfeld: Innenmasse wie Grossfeld angenommen (BASPO nennt nur die Feldgrösse).'},
+      {id:'gross',name:'Grossfeld',L:40,B:20,Lmin:36,Lmax:40,Bmin:18,Bmax:20,sz:{stirn:0.5,laengs:0.5},lm:230},
+      {id:'klein',name:'Kleinfeld',L:24,B:14,Lmin:22,Lmax:24,Bmin:13,Bmax:14,sz:{stirn:0.5,laengs:0.5}},
+      {id:'kleinDE',name:'Kleinfeld Junior*innen D/E',L:24,B:14,Lmin:21,Lmax:24,Bmin:11,Bmax:14,sz:{stirn:0.5,laengs:0.5}},
     ],
-    opts:[{k:'rand',l:'Feldbegrenzung als Linie',t:'bool',def:true},{k:'tlinie',l:'Torlinie gestrichelt über ganze Breite',t:'bool',def:true}],
+    opts:[
+      {k:'rand',l:'Feldbegrenzung als Linie',t:'bool',def:true},
+      // Die Verlängerung der Torlinie ist laut SPR nur gedacht: bestehende Felder behalten sie, neue Felder ohne
+      {k:'tlinie',l:'Torlinie gestrichelt über ganze Breite (nicht in den Regeln)',t:'bool',def:true,neu:false},
+      {k:'pfosten',l:'Marken für die Torpfosten (2 Striche 10 cm hinter der Torlinie)',t:'bool',def:false,neu:true},
+    ],
     build(f){
-      const g=G(),L=f.L,B=f.B,lw=f.lw,cy=B/2;
+      const g=G(),L=f.L,B=f.B,lw=f.lw,cy=B/2,kf=f.stufe!=='gross';
+      // SPR 102: Torlinien 33 m (Kleinfeld 18 m) auseinander, also ab Mitte ausgerichtet; alle Räume inkl. Linien gemessen.
+      // gl = Aussenkante der Torlinie (= hintere Schutzraumlinie) ab Bande, tr = Hinterkante Torraum (0.65 m davor)
+      const gl=L/2-(kf?9:16.5),tr=gl-0.65,tl=kf?3.0:4.0,tb=kf?4.5:5.0,bp=kf?1.0:1.5,xg=gl+lw/2;
       if(f.opt.rand)rectIn(g,L,B,lw);
       Ln(g,L/2,lw,L/2,B-lw,lw);
-      const e=G(),gl=3.5;
-      if(f.opt.tlinie)dashed(e,[{t:'l',x1:gl,y1:lw,x2:gl,y2:B-lw}],0.5,0.3,lw);
-      rectC(e,gl-0.65,cy-2.5,gl+3.35,cy+2.5,lw);      // Torraum 5.00 x 4.00 m
-      rectC(e,gl,cy-1.25,gl+1.0,cy+1.25,lw);           // Torhüterraum 2.50 x 1.00 m
-      e.marks.push({kind:'cross',x:gl,y:1.5,size:0.3,diag:true},{kind:'cross',x:gl,y:B-1.5,size:0.3,diag:true});
+      const e=G();
+      if(f.opt.tlinie)dashed(e,[{t:'l',x1:xg,y1:lw,x2:xg,y2:B-lw}],0.5,0.3,lw);
+      rectC(e,tr+lw/2,cy-tb/2+lw/2,tr+tl-lw/2,cy+tb/2-lw/2,lw);      // Torraum 4.00 x 5.00 m (Kleinfeld 3.00 x 4.50 m)
+      rectC(e,gl+lw/2,cy-1.25+lw/2,gl+1-lw/2,cy+1.25-lw/2,lw);       // Schutzraum 1.00 x 2.50 m
+      if(f.opt.pfosten)for(const s of [-1,1])Ln(e,gl,cy+s*0.80,gl-0.10,cy+s*0.80,lw);   // Pfostenmarken 1.60 m auseinander
+      e.marks.push({kind:'cross',x:xg,y:bp,size:0.3,diag:true},{kind:'cross',x:xg,y:B-bp,size:0.3,diag:true});
       e.guides.push({shape:'rect',x:gl-0.65,y:cy-0.8,w:0.65,h:1.6});
       merge(g,e);merge(g,mirrorX(e,L));
-      g.marks.push({kind:'cross',x:L/2,y:1.5,size:0.3,diag:true},{kind:'cross',x:L/2,y:B-1.5,size:0.3,diag:true},{kind:'cross',x:L/2,y:cy,size:0.3,diag:true});
-      DL(g,0,B,L,B,0,1.2);DL(g,0,0,0,B,-1.2,0);DL(g,0,1.5,3.5,1.5,0,-0.5);DL(g,3.5,0,3.5,1.5,0.4,0);
-      DL(g,2.85,cy+2.5,6.85,cy+2.5,0,0.6);DL(g,6.85,cy-2.5,6.85,cy+2.5,0.7,0);
+      g.marks.push({kind:'cross',x:L/2,y:bp,size:0.3,diag:true},{kind:'cross',x:L/2,y:B-bp,size:0.3,diag:true},{kind:'cross',x:L/2,y:cy,size:0.3,diag:true});
+      if(tr<0.05)g.warns.push('Feld zu kurz: Der Torraum reicht bis an die Bande.');
+      DL(g,0,B,L,B,0,1.2);DL(g,0,0,0,B,-1.2,0);DL(g,0,bp,gl,bp,0,-0.5);DL(g,gl,0,gl,bp,0.4,0);DL(g,gl,cy-0.8,L/2,cy-0.8,0,0);
+      DL(g,tr,cy+tb/2,tr+tl,cy+tb/2,0,0.6);DL(g,tr+tl,cy-tb/2,tr+tl,cy+tb/2,0.7,0);DL(g,0,cy+tb/2,tr,cy+tb/2,0,0.6);
       g.outline={x0:0,y0:0,x1:L,y1:B};g.labelAt={x:L*0.3,y:cy};
       return shiftG(g,-L/2,-cy);
     }},
