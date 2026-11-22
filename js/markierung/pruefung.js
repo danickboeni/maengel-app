@@ -14,7 +14,8 @@ function stufeOf(f){const N=NORM[f.sport];return N.stufen.find(s=>s.id===f.stufe
 function szOf(f){return stufeOf(f).sz||{stirn:0,laengs:0};}
 function makeField(sport,stufeId,x,y,rot=0,over={}){
   const N=NORM[sport],st=N.stufen.find(s=>s.id===stufeId)||N.stufen[0],opt={};
-  (N.opts||[]).forEach(o=>opt[o.k]=o.def);Object.assign(opt,st.opt||{});
+  // «neu»: Wert nur für neu gesetzte Felder; bestehende Pläne bekommen beim Laden «def» (alte Darstellung bleibt)
+  (N.opts||[]).forEach(o=>opt[o.k]=('neu' in o)?o.neu:o.def);Object.assign(opt,st.opt||{});
   return Object.assign({id:newId(),sport,stufe:st.id,name:uniqueName(N.name),x,y,rot,prio:nextPrio(),color:N.defColor,lw:N.lw,L:st.L||0,B:st.B||0,hidden:false,opt},over);
 }
 const byId=id=>state.fields.find(f=>f.id===id);

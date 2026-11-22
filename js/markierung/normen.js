@@ -128,10 +128,12 @@ const NORM={
     opts:[
       {k:'corner',l:'Dreipunktlinie – Seitenlinie',u:'m',t:'num',min:0,max:2,step:0.05,def:0.90},
       {k:'mast',l:'Korbmast hinter Endlinie',t:'select',def:1,options:MAST_OPTS},
-      {k:'bank',l:'Mannschaftsbankbereich (Linien gegenüber Einwurfseite)',t:'select',def:2,options:[[2,'Linien 2.00 m lang'],[1,'Linien 1.00 m lang'],[0,'keine']]},
+      {k:'bank',l:'Mannschaftsbankbereich (Bankseite = Seitenlinie unten bei 0°)',t:'select',def:2,options:[[2,'Linien 2.00 m lang'],[1,'Linien 1.00 m lang'],[0,'keine']]},
       {k:'posmarks',l:'Positionsmarken an der Zone',t:'bool',def:true},
       {k:'nocharge',l:'No-Charge-Halbkreise',t:'bool',def:true},
       {k:'throwin',l:'Einwurflinien',t:'bool',def:true},
+      // FIBA 2026: 4 Einwurflinien, je 2 an beiden Seitenlinien. Nur neue Felder; ältere Pläne behalten 2 Linien.
+      {k:'throwin2',l:'Einwurflinien auch an der Bankseite (FIBA 2026: an beiden Seitenlinien)',t:'bool',def:false,neu:true,if:o=>o.throwin},
     ],
     build(f){
       const g=G(),L=f.L,B=f.B,lw=f.lw,cy=B/2,o=f.opt;
@@ -149,7 +151,7 @@ const NORM={
         Ar(e,bx,cy,r3,-phi,phi,lw);}
       else{const phi=Math.acos(clamp(-bx/r3,-1,1));Ar(e,bx,cy,r3,-phi,phi,lw);}
       if(o.nocharge){const rn=1.25+lw/2;Ar(e,bx,cy,rn,-PI/2,PI/2,lw);Ln(e,1.20,cy-rn,bx,cy-rn,lw);Ln(e,1.20,cy+rn,bx,cy+rn,lw);}
-      if(o.throwin){const xt=8.325-lw/2;Ln(e,xt,-lw,xt,-lw-0.15,lw);}
+      if(o.throwin){const xt=8.325-lw/2;Ln(e,xt,-lw,xt,-lw-0.15,lw);if(o.throwin2)Ln(e,xt,B+lw,xt,B+lw+0.15,lw);}
       // Positionsmarken an beiden Seiten der Zone (BASPO 801: 175 | 5 | 85 | 40 | 85 | 5 | 85 | 5 | 95 cm ab Innenkante Endlinie)
       if(o.posmarks)for(const sg of [-1,1]){const y0=cy+sg*2.45,y1=cy+sg*2.55;
         for(const xm of [1.775,3.925,4.825])Ln(e,xm,y0,xm,y1,0.05);
