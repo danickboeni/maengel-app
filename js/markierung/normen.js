@@ -169,43 +169,52 @@ const NORM={
       g.outline={x0:-lw,y0:-lw,x1:L+lw,y1:B+lw};g.labelAt={x:L/2,y:cy+2.9};
       return shiftG(g,-L/2,-cy);
     }},
-  volleyball:{name:'Volleyball',gruppe:'Ballspiele',quelle:'BASPO 801',farbeEmpf:'helle Farbe',defColor:'gelb',lw:0.05,sized:true,lineRef:'Aussenmass (Linien innerhalb)',
+  volleyball:{name:'Volleyball',gruppe:'Ballspiele',quelle:'Swiss Volley, Offizielle Volleyball-Regeln 2025–2028; Freizonen Regional/NLB/NLA aus BASPO 801 (2010)',farbeEmpf:'helle Farbe',defColor:'gelb',lw:0.05,sized:true,lineRef:'Aussenmass (Linien innerhalb)',
     stufen:[
-      {id:'reg',name:'Regional',L:18,B:9,sz:{stirn:1.5,laengs:1.5},lm:81.60},
-      {id:'nlb',name:'NLB',L:18,B:9,sz:{stirn:3,laengs:1.5},lm:81.60},
-      {id:'nla',name:'NLA',L:18,B:9,sz:{stirn:6,laengs:3},lm:81.60},
-      {id:'int',name:'International',L:18,B:9,sz:{stirn:8,laengs:5},lm:81.60},
+      {id:'regeln',name:'Regeln Swiss Volley (Freizone min. 3 m)',L:18,B:9,sz:{stirn:3,laengs:3},lm:81.60},
+      {id:'reg',name:'Regional (BASPO 2010)',L:18,B:9,sz:{stirn:1.5,laengs:1.5},lm:81.60},
+      {id:'nlb',name:'NLB (BASPO 2010)',L:18,B:9,sz:{stirn:3,laengs:1.5},lm:81.60},
+      {id:'nla',name:'NLA (BASPO 2010)',L:18,B:9,sz:{stirn:6,laengs:3},lm:81.60},
+      {id:'int',name:'International / FIVB',L:18,B:9,sz:{stirn:6.5,laengs:5},lm:81.60},
     ],
     opts:[
       {k:'post',l:'Netzpfosten ausserhalb Seitenlinie',u:'m',t:'num',min:0.5,max:1,step:0.05,def:1},
       {k:'ext',l:'Angriffslinien verlängern (gestrichelt)',t:'bool',def:false},
+      // Regel 1.4.2: Aufschlagzone seitlich begrenzt durch 15 cm lange Striche, 20 cm hinter der Grundlinie, in Verlängerung
+      // der Seitenlinien. Nur neue Felder; ältere Pläne behalten ihre Darstellung.
+      {k:'aufschlag',l:'Aufschlagzone: Striche 15 cm, 20 cm hinter der Grundlinie',t:'bool',def:false,neu:true},
     ],
     build(f){
       const g=G(),L=f.L,B=f.B,lw=f.lw,m=L/2,o=f.opt;
       rectIn(g,L,B,lw);Ln(g,m,lw,m,B-lw,lw);
       for(const xa of [m-3+lw/2,m+3-lw/2]){Ln(g,xa,lw,xa,B-lw,lw);
         if(o.ext)for(let k=0;k<5;k++){const s=0.2+k*0.35;Ln(g,xa,-s,xa,-s-0.15,lw);Ln(g,xa,B+s,xa,B+s+0.15,lw);}}
+      if(o.aufschlag)for(const y of [lw/2,B-lw/2]){Ln(g,-0.20,y,-0.35,y,lw);Ln(g,L+0.20,y,L+0.35,y,lw);}
       // Netzpfosten sind mobil: keine Warnung, wenn sie in einem anderen Feld stehen
       const p=+o.post;g.posts.push({x:m,y:-p,label:'Netzpfosten',mobil:true},{x:m,y:B+p,label:'Netzpfosten',mobil:true});
       g.guides.push({shape:'line',x1:m,y1:-p,x2:m,y2:B+p});
       DL(g,0,B,L,B,0,1.4);DL(g,0,0,0,B,-1.4,0);DL(g,m,B,m-3,B,0,0.6);DL(g,m,B,m+3,B,0,0.6);
+      if(o.aufschlag)DL(g,-0.20,0,0,0,0,-0.5);
       g.outline={x0:0,y0:0,x1:L,y1:B};g.labelAt={x:L*0.25,y:B/2};
       return shiftG(g,-m,-B/2);
     }},
-  handball:{name:'Handball',gruppe:'Ballspiele',quelle:'BASPO 801',farbeEmpf:'rot oder orange',defColor:'weiss',lw:0.05,sized:true,lineRef:'Aussenmass (Linien innerhalb)',
+  handball:{name:'Handball',gruppe:'Ballspiele',quelle:'IHF-Spielregeln Hallenhandball (1. Juli 2025); BASPO 801',farbeEmpf:'rot oder orange',defColor:'weiss',lw:0.05,sized:true,lineRef:'Aussenmass (Linien innerhalb)',
     stufen:[{id:'norm',name:'Norm',L:40,B:20,sz:{stirn:2,laengs:1},lm:236.30}],
-    opts:[{k:'subst',l:'Auswechselmarken',t:'bool',def:true}],
+    opts:[{k:'subst',l:'Auswechselmarken',t:'bool',def:true},
+      {k:'anwurf',l:'Anwurfzone (Kreis ø 4 m; Pflicht nur bei IHF und Profiligen)',t:'bool',def:false}],
     build(f){
       const g=G(),L=f.L,B=f.B,lw=f.lw,cy=B/2,gh=1.5,glw=0.08;
       Ln(g,0,lw/2,L,lw/2,lw);Ln(g,0,B-lw/2,L,B-lw/2,lw);Ln(g,L/2,lw,L/2,B-lw,lw);
+      if(f.opt.anwurf){Ar(g,L/2,cy,2-lw/2,0,TAU,lw);DR(g,L/2,cy,2,-PI/4,'ø 4.00');}   // Anwurfzone, Linie gehört zur Zone
       const e=G();
       Ln(e,lw/2,lw,lw/2,cy-gh,lw);Ln(e,glw/2,cy-gh,glw/2,cy+gh,glw);Ln(e,lw/2,cy+gh,lw/2,B-lw,lw);
       const r6=6-lw/2,a6=clipTop(r6,cy-gh,lw);
       Ar(e,0,cy-gh,r6,a6,0,lw);Ln(e,r6,cy-gh,r6,cy+gh,lw);Ar(e,0,cy+gh,r6,0,-a6,lw);
       const r9=9-lw/2,a9=clipTop(r9,cy-gh,lw);
       dashed(e,[{t:'a',cx:0,cy:cy-gh,r:r9,a0:a9,a1:0},{t:'l',x1:r9,y1:cy-gh,x2:r9,y2:cy+gh},{t:'a',cx:0,cy:cy+gh,r:r9,a0:0,a1:-a9}],0.15,0.15,lw);
-      Ln(e,7+lw/2,cy-0.5,7+lw/2,cy+0.5,lw);
-      Ln(e,4+lw/2,cy-0.075,4+lw/2,cy+0.075,lw);
+      // 7-m- und 4-m-Linie: Mass ab Hinterkante Torlinie bis Vorderkante der Linie, die Linie liegt innerhalb (IHF Regel 1:6/1:7)
+      Ln(e,7-lw/2,cy-0.5,7-lw/2,cy+0.5,lw);
+      Ln(e,4-lw/2,cy-0.075,4-lw/2,cy+0.075,lw);
       if(f.opt.subst){const xs=L/2-4.5-lw/2;Ln(e,xs,-0.15,xs,lw+0.15,lw);}
       e.guides.push({shape:'rect',x:-1,y:cy-gh-0.08,w:1,h:2*gh+0.16});
       merge(g,e);merge(g,mirrorX(e,L));
