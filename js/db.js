@@ -111,14 +111,25 @@ export function platzSpeichern(platz) {
   }).then(() => { aenderungMerken(); return p; });
 }
 
-const FOTO_FELDER = ['fotoId', 'fotoNachherId'];
+// Fotos eines Mangels: Listen fotoIds (vorher) und fotoNachherIds.
+// Mängel aus früheren Versionen haben je ein Einzelfoto fotoId / fotoNachherId – es wird zum ersten Foto der Liste.
+export function fotoListen(mangel) {
+  const liste = (ids, alt) => (Array.isArray(ids) ? [...ids] : (alt ? [alt] : []));
+  return {
+    vorher: liste(mangel?.fotoIds, mangel?.fotoId),
+    nachher: liste(mangel?.fotoNachherIds, mangel?.fotoNachherId),
+  };
+}
+
+function alleFotoIds(mangel) {
+  const { vorher, nachher } = fotoListen(mangel);
+  return [...vorher, ...nachher];
+}
 
 function fotosEntfernen(tx, mangel) {
-  for (const feld of FOTO_FELDER) {
-    if (mangel[feld]) {
-      tx.objectStore('fotos').delete(mangel[feld]);
-      tx.objectStore('vorschauen').delete(mangel[feld]);
-    }
+  for (const id of alleFotoIds(mangel)) {
+    tx.objectStore('fotos').delete(id);
+    tx.objectStore('vorschauen').delete(id);
   }
 }
 
@@ -136,32 +147,34 @@ export function platzLoeschen(platzId) {
   }).then(aenderungMerken);
 }
 
-// Speichert einen Mangel samt Fotoänderungen.
-// fotos = { fotoId: { neu, entfernen }, fotoNachherId: { neu, entfernen } }
-//   neu = { daten: ArrayBuffer, typ, breite, hoehe, groesse, vorschau: { daten, typ } } oder null
-//   entfernen = true löscht ein bestehendes Foto ohne Ersatz
+// Speichert einen Mangel samt Fotoänderungen. Einzelfotos aus früheren Versionen werden dabei zu Listen.
+// fotos = { vorher: { neu: [...], entfernen: [...] }, nachher: { neu: [...], entfernen: [...] } }
+//   neu = Liste von { daten: ArrayBuffer, typ, breite, hoehe, groesse, vorschau: { daten, typ } }
+//   entfernen = Liste von Foto-ids dieses Mangels
 export function mangelSpeichern(mangel, fotos = {}) {
   const jetzt = new Date().toISOString();
-  const m = { ...mangel, geaendert: jetzt };
+  const listen = fotoListen(mangel);
+  const { fotoId: _v, fotoNachherId: _n, ...rest } = mangel;
+  const m = { ...rest, fotoIds: listen.vorher, fotoNachherIds: listen.nachher, geaendert: jetzt };
   if (!m.id) { m.id = neueId(); m.erstellt = jetzt; }
   return transaktion(['maengel', 'fotos', 'vorschauen'], 'readwrite', (tx) => {
     const fotoStore = tx.objectStore('fotos');
     const vorschauStore = tx.objectStore('vorschauen');
-    for (const feld of FOTO_FELDER) {
-      const aenderung = fotos[feld];
+    for (const [teil, feld] of [['vorher', 'fotoIds'], ['nachher', 'fotoNachherIds']]) {
+      const aenderung = fotos[teil];
       if (!aenderung) continue;
-      const alt = m[feld] || null;
-      if (aenderung.neu) {
-        const { vorschau, ...foto } = aenderung.neu;
+      for (const id of aenderung.entfernen || []) {
+        if (!m[feld].includes(id)) continue;
+        fotoStore.delete(id);
+        vorschauStore.delete(id);
+        m[feld] = m[feld].filter((x) => x !== id);
+      }
+      for (const neu of aenderung.neu || []) {
+        const { vorschau, ...foto } = neu;
         const id = neueId();
         fotoStore.put({ id, ...foto, erstellt: jetzt });
         if (vorschau) vorschauStore.put({ id, ...vorschau });
-        if (alt) { fotoStore.delete(alt); vorschauStore.delete(alt); }
-        m[feld] = id;
-      } else if (aenderung.entfernen && alt) {
-        fotoStore.delete(alt);
-        vorschauStore.delete(alt);
-        m[feld] = null;
+        m[feld].push(id);
       }
     }
     tx.objectStore('maengel').put(m);
@@ -221,7 +234,7 @@ export function importieren({ plaetze = [], maengel = [], fotos = [], offerten =
       // Benutzte Fotos sammeln, alle anderen entfernen
       const benutzt = new Set();
       tx.objectStore('maengel').getAll().onsuccess = (ev) => {
-        for (const m of ev.target.result) for (const feld of FOTO_FELDER) if (m[feld]) benutzt.add(m[feld]);
+        for (const m of ev.target.result) for (const id of alleFotoIds(m)) benutzt.add(id);
         tx.objectStore('positionen').getAll().onsuccess = (ev2) => {
           for (const p of ev2.target.result) for (const id of p.fotoIds || []) benutzt.add(id);
           fs.getAllKeys().onsuccess = (ev3) => {

@@ -8,7 +8,7 @@ import {
 } from './karte.js';
 import {
   KATEGORIEN, DRINGLICHKEIT, ERLEDIGT_FARBE, istErledigt, dringlichkeit, maengelSortieren,
-  POSITIONSARTEN, MAX_FOTOS_POSITION,
+  POSITIONSARTEN, MAX_FOTOS_POSITION, MAX_FOTOS_MANGEL,
 } from './konstanten.js';
 import {
   sicherungErstellen, sicherungWeitergeben, sicherungPruefen, sicherungEinlesen, sicherungFaellig,
@@ -222,66 +222,6 @@ function reiterHtml(aktiv, knopf = '') {
   </div>`;
 }
 
-// ---------- Baustein: Fotofeld (aufnehmen, Galerie, Vorschau, entfernen) ----------
-
-function fotoFeldHtml(titel) {
-  return `<div class="feld foto-feld">
-    <span>${titel}</span>
-    <div class="foto-vorschau" hidden><img alt="Foto"><button type="button" class="knopf klein foto-weg">Foto entfernen</button></div>
-    <div class="knopf-reihe">
-      <label class="knopf">Foto aufnehmen<input type="file" accept="image/*" capture="environment" class="foto-kamera" hidden></label>
-      <label class="knopf">Aus Galerie<input type="file" accept="image/*" class="foto-galerie" hidden></label>
-    </div>
-    <span class="hinweis foto-status"></span>
-  </div>`;
-}
-
-// Liefert { aenderung() } → { neu, entfernen } für db.mangelSpeichern
-function fotoFeldAktivieren(el, bestehend, { beiAenderung, knopf }) {
-  let neu = null;
-  let entfernen = false;
-  let url = null;
-  const vorschau = el.querySelector('.foto-vorschau');
-  const status = el.querySelector('.foto-status');
-  function zeige(foto) {
-    if (url) URL.revokeObjectURL(url);
-    url = foto ? alsUrl(foto) : null;
-    vorschau.hidden = !foto;
-    if (foto) vorschau.querySelector('img').src = url;
-  }
-  beimVerlassen(() => { if (url) URL.revokeObjectURL(url); });
-  zeige(bestehend);
-
-  async function gewaehlt(ev) {
-    const datei = ev.target.files && ev.target.files[0];
-    ev.target.value = '';
-    if (!datei) return;
-    knopf.disabled = true;
-    status.textContent = 'Foto wird verkleinert …';
-    try {
-      neu = await verkleinern(datei);
-      entfernen = false;
-      zeige(neu);
-      status.textContent = `${neu.breite} × ${neu.hoehe} px, ${Math.round(neu.groesse / 1024)} KB`;
-      beiAenderung();
-    } catch (e) {
-      status.textContent = '';
-      meldung(e.message, true);
-    } finally {
-      knopf.disabled = false;
-    }
-  }
-  for (const inp of el.querySelectorAll('input[type=file]')) inp.addEventListener('change', gewaehlt);
-  el.querySelector('.foto-weg').onclick = () => {
-    neu = null;
-    entfernen = true;
-    zeige(null);
-    status.textContent = '';
-    beiAenderung();
-  };
-  return { aenderung: () => ({ neu, entfernen }) };
-}
-
 // ---------- Ansicht: Plätze ----------
 
 async function plaetzeListe() {
@@ -414,9 +354,14 @@ async function maengelListe(abfrage) {
       : sortiert.map((m) => {
         const d = dringlichkeit(m);
         const erledigt = istErledigt(m);
-        const bildId = (erledigt && m.fotoNachherId) || m.fotoId;
+        const fotos = db.fotoListen(m);
+        const nachher = erledigt ? fotos.nachher : [];
+        const bildId = nachher[0] || fotos.vorher[0];
+        const anzahl = fotos.vorher.length + nachher.length;
         return `<li><a class="eintrag mangel-eintrag" href="#/mangel/${m.id}">
-          ${bildId ? `<img class="mini" data-foto="${bildId}" alt="">` : '<span class="mini leer-bild" aria-hidden="true"></span>'}
+          ${bildId
+            ? `<span class="mini-rahmen"><img class="mini" data-foto="${bildId}" alt="">${anzahl > 1 ? `<span class="mini-zahl" aria-label="${anzahl} Fotos">${anzahl}</span>` : ''}</span>`
+            : '<span class="mini leer-bild" aria-hidden="true"></span>'}
           <span class="eintrag-text">
             <span class="eintrag-titel">${esc(m.kategorie)}</span>
             <span class="eintrag-unter">${esc(platzName[m.platzId] || '–')} · ${kurzdatum(erledigt ? m.erledigtAm : m.erstellt)}</span>
@@ -680,7 +625,6 @@ async function mangelFormular({ platzId, mangelId }) {
   }
   const platz = await db.holen('plaetze', platzId);
   if (!platz) throw new Error('Platz nicht gefunden.');
-  const bestehendesFoto = mangel?.fotoId ? await db.holen('fotos', mangel.fotoId) : null;
   if (!nochAktuell(token)) return;
   const zurueck = mangel ? `#/mangel/${mangel.id}` : `#/platz/${platz.id}`;
   kopf(mangel ? 'Mangel bearbeiten' : 'Neuer Mangel', zurueck, null);
@@ -700,7 +644,7 @@ async function mangelFormular({ platzId, mangelId }) {
         <span id="gps-status" class="hinweis"></span>
       </div>
 
-      ${fotoFeldHtml(mangel && istErledigt(mangel) ? 'Foto vorher' : 'Foto')}
+      ${fotosFeldHtml(`${mangel && istErledigt(mangel) ? 'Fotos vorher' : 'Fotos'} (bis ${MAX_FOTOS_MANGEL})`)}
 
       <fieldset class="feld">
         <legend>Kategorie</legend>
@@ -765,8 +709,9 @@ async function mangelFormular({ platzId, mangelId }) {
   if (!mangel) gpsStarten();
   else status.textContent = 'Gespeicherte Stelle. «Zum GPS» springt zu deiner Position.';
 
-  // --- Foto ---
-  const fotoFeld = fotoFeldAktivieren(form.querySelector('.foto-feld'), bestehendesFoto, { beiAenderung: markiere, knopf: speichernKnopf });
+  // --- Fotos ---
+  const fotoFeld = fotosFeldAktivieren(form.querySelector('.fotos-feld'), db.fotoListen(mangel).vorher,
+    { beiAenderung: markiere, knopf: speichernKnopf, max: MAX_FOTOS_MANGEL });
 
   // --- Auswahl Kategorie / Dringlichkeit ---
   function auswahl(containerId, feld) {
@@ -798,14 +743,14 @@ async function mangelFormular({ platzId, mangelId }) {
     speichernKnopf.disabled = true;
     try {
       const gespeichert = await db.mangelSpeichern({
-        ...(mangel || { status: 'offen', platzId: platz.id, fotoId: null }),
+        ...(mangel || { status: 'offen', platzId: platz.id, fotoIds: [], fotoNachherIds: [] }),
         lat: mitte.lat,
         lng: mitte.lng,
         gps: gps ? { lat: gps.lat, lng: gps.lng, genauigkeit: gps.genauigkeit } : (mangel?.gps || null),
         kategorie: wahl.kategorie,
         dringlichkeit: wahl.dringlichkeit,
         notiz: form.notiz.value.trim(),
-      }, { fotoId: fotoFeld.aenderung() });
+      }, { vorher: fotoFeld.aenderung() });
       db.dauerhaftAnfragen();
       meldung('Mangel gespeichert');
       if (mangel) zurueckZu(`#/mangel/${gespeichert.id}`);
@@ -824,7 +769,6 @@ async function erledigtFormular(mangelId) {
   const mangel = await db.holen('maengel', mangelId);
   if (!mangel) throw new Error('Mangel nicht gefunden.');
   const platz = await db.holen('plaetze', mangel.platzId);
-  const bestehend = mangel.fotoNachherId ? await db.holen('fotos', mangel.fotoNachherId) : null;
   if (!nochAktuell(token)) return;
   kopf('Erledigt melden', `#/mangel/${mangel.id}`, null);
 
@@ -834,7 +778,7 @@ async function erledigtFormular(mangelId) {
         <strong>${esc(mangel.kategorie)}</strong>
         <span>${esc(platz?.name || '')}${mangel.notiz ? ` · ${esc(mangel.notiz)}` : ''}</span>
       </div>
-      ${fotoFeldHtml('Foto «nachher» (freiwillig)')}
+      ${fotosFeldHtml(`Fotos «nachher» (freiwillig, bis ${MAX_FOTOS_MANGEL})`)}
       <label class="feld">Was wurde gemacht? (freiwillig)
         <textarea name="erledigtNotiz" rows="3" maxlength="1000" placeholder="z. B. Belag geflickt, Netz ersetzt …">${esc(mangel.erledigtNotiz)}</textarea>
       </label>
@@ -847,7 +791,8 @@ async function erledigtFormular(mangelId) {
   const markiere = () => { geaendert = true; };
   form.addEventListener('input', markiere);
   schutz(() => !geaendert || confirm('Erledigt-Meldung verwerfen?'));
-  const fotoFeld = fotoFeldAktivieren(form.querySelector('.foto-feld'), bestehend, { beiAenderung: markiere, knopf });
+  const fotoFeld = fotosFeldAktivieren(form.querySelector('.fotos-feld'), db.fotoListen(mangel).nachher,
+    { beiAenderung: markiere, knopf, max: MAX_FOTOS_MANGEL });
 
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
@@ -858,7 +803,7 @@ async function erledigtFormular(mangelId) {
         status: 'erledigt',
         erledigtAm: new Date().toISOString(),
         erledigtNotiz: form.erledigtNotiz.value.trim(),
-      }, { fotoNachherId: fotoFeld.aenderung() });
+      }, { nachher: fotoFeld.aenderung() });
       meldung('Als erledigt gemeldet');
       zurueckZu(`#/mangel/${mangel.id}`);
     } catch (e) {
@@ -875,24 +820,32 @@ async function mangelAnsicht(mangelId) {
   const mangel = await db.holen('maengel', mangelId);
   if (!mangel) throw new Error('Mangel nicht gefunden.');
   const erledigt = istErledigt(mangel);
+  const fotos = db.fotoListen(mangel);
+  const vorherIds = fotos.vorher;
+  const nachherIds = erledigt ? fotos.nachher : [];
   const [platz, foto, nachher] = await Promise.all([
     db.holen('plaetze', mangel.platzId),
-    mangel.fotoId ? db.holen('fotos', mangel.fotoId) : null,
-    erledigt && mangel.fotoNachherId ? db.holen('fotos', mangel.fotoNachherId) : null,
+    vorherIds[0] ? db.holen('fotos', vorherIds[0]) : null,
+    nachherIds[0] ? db.holen('fotos', nachherIds[0]) : null,
   ]);
   if (!nochAktuell(token)) return;
   const d = dringlichkeit(mangel);
   const zurueck = vorherigeListe() || `#/platz/${mangel.platzId}`;
   kopf(mangel.kategorie, zurueck, null);
 
+  // Erstes Foto gross, weitere klein darunter (Antippen = gross)
+  const streifen = (ids, name) => (ids.length > 1
+    ? `<div class="foto-streifen">${ids.slice(1).map((id, i) => `<img data-foto-id="${esc(id)}" alt="${name} ${i + 2}">`).join('')}</div>`
+    : '');
+  const anzahl = (ids) => (ids.length > 1 ? ` (${ids.length})` : '');
   let fotosHtml;
   if (nachher) {
     fotosHtml = `<div class="vorher-nachher">
-      <figure>${foto ? '<img data-foto="vorher" alt="Foto vorher">' : '<div class="kein-foto">Kein Foto</div>'}<figcaption>Vorher</figcaption></figure>
-      <figure><img data-foto="nachher" alt="Foto nachher"><figcaption>Nachher</figcaption></figure>
+      <figure>${foto ? '<img data-foto="vorher" alt="Foto vorher">' : '<div class="kein-foto">Kein Foto</div>'}<figcaption>Vorher${anzahl(vorherIds)}</figcaption>${foto ? streifen(vorherIds, 'Foto vorher') : ''}</figure>
+      <figure><img data-foto="nachher" alt="Foto nachher"><figcaption>Nachher${anzahl(nachherIds)}</figcaption>${streifen(nachherIds, 'Foto nachher')}</figure>
     </div>`;
   } else if (foto) {
-    fotosHtml = '<img data-foto="vorher" class="foto-gross" alt="Foto des Mangels">';
+    fotosHtml = `<img data-foto="vorher" class="foto-gross" alt="Foto des Mangels">${streifen(vorherIds, 'Foto')}`;
   } else {
     fotosHtml = '<div class="kein-foto">Kein Foto</div>';
   }
@@ -932,6 +885,22 @@ async function mangelAnsicht(mangelId) {
     img.addEventListener('click', () => grossAnzeigen(url));
     beimVerlassen(() => URL.revokeObjectURL(url));
   }
+  for (const img of ansicht.querySelectorAll('img[data-foto-id]')) {
+    const id = img.dataset.fotoId;
+    db.vorschauHolen(id, vorschauAusFoto).then((v) => {
+      if (!v || !nochAktuell(token)) return;
+      const url = alsUrl(v);
+      img.src = url;
+      beimVerlassen(() => URL.revokeObjectURL(url));
+    }).catch((e) => console.warn('Vorschau fehlt', e));
+    img.addEventListener('click', async () => {
+      const f = await db.holen('fotos', id);
+      if (!f || !nochAktuell(token)) return;
+      const url = alsUrl(f);
+      beimVerlassen(() => URL.revokeObjectURL(url));
+      grossAnzeigen(url);
+    });
+  }
   beimVerlassen(() => { for (const el of document.querySelectorAll('.foto-voll')) el.remove(); });
 
   const farbe = erledigt ? ERLEDIGT_FARBE : d.farbe;
@@ -949,7 +918,7 @@ async function mangelAnsicht(mangelId) {
   }
 
   document.getElementById('loeschen').onclick = async () => {
-    const mitFoto = mangel.fotoId || mangel.fotoNachherId;
+    const mitFoto = fotos.vorher.length || fotos.nachher.length;
     if (!confirm(mitFoto ? 'Diesen Mangel mit Fotos endgültig löschen?' : 'Diesen Mangel endgültig löschen?')) return;
     await db.mangelLoeschen(mangel);
     meldung('Mangel gelöscht');
@@ -1101,7 +1070,7 @@ async function berichtAnsicht(platzId) {
           <button type="button" class="segment" data-wert="nein">Ohne Fotos</button>
         </div>
       </fieldset>
-      <p class="hinweis">Der Bericht enthält einen Übersichtsplan mit nummerierten Punkten, eine Liste und jeden Mangel mit nahem Detailplan und – falls gewählt – Foto.
+      <p class="hinweis">Der Bericht enthält einen Übersichtsplan mit nummerierten Punkten, eine Liste und jeden Mangel mit nahem Detailplan und – falls gewählt – allen Fotos.
         Für das Luftbild im Plan braucht es Empfang oder eine offline gespeicherte Karte.</p>
       <span class="hinweis" id="b-status" aria-live="polite"></span>
       <div id="b-fertig" hidden class="karte-block">
@@ -1553,7 +1522,7 @@ function fotosFeldAktivieren(el, bestehende, { beiAenderung, knopf, max = MAX_FO
     ev.target.value = '';
     if (!dateien.length) return;
     const platz = max - eintraege.length;
-    if (dateien.length > platz) meldung(`Höchstens ${max} Fotos pro Position – ${dateien.length - platz} nicht übernommen.`, true);
+    if (dateien.length > platz) meldung(`Höchstens ${max} Fotos – ${dateien.length - platz} nicht übernommen.`, true);
     knopf.disabled = true;
     try {
       for (const [i, datei] of dateien.slice(0, platz).entries()) {

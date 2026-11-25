@@ -221,9 +221,6 @@ body {
 .segmente.klein .segment + .segment { border-left: 1px solid #d9dfdb; }
 .segmente.klein .segment.aktiv { background: var(--gruen); color: #fff; }
 
-.foto-vorschau { display: grid; gap: 8px; }
-.foto-vorschau[hidden] { display: none; }
-.foto-vorschau img { width: 100%; max-height: 50vh; object-fit: contain; border-radius: var(--radius); background: #000; }
 
 /* ---------- Karte ---------- */
 
@@ -386,6 +383,23 @@ body {
 .mangel-eintrag { gap: 12px; min-height: 84px; padding: 10px 12px; }
 .mini { flex: none; width: 64px; height: 64px; border-radius: 8px; object-fit: cover; background: #e3e7e5; }
 .mini.leer-bild { display: block; background: repeating-linear-gradient(45deg, #e3e7e5 0 6px, #eef1ef 6px 12px); }
+.mini-rahmen { position: relative; flex: none; display: block; }
+.mini-rahmen .mini { display: block; }
+.mini-zahl {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 22px;
+  text-align: center;
+}
 .eintrag-notiz { color: var(--text-2); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .liste .leer { padding: 32px 8px; }
 
@@ -417,12 +431,18 @@ body {
 .zusammenfassung { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; background: #fff; border: 1px solid var(--linie); border-radius: var(--radius); }
 .zusammenfassung span { color: var(--text-2); font-size: 15px; }
 
-.vorher-nachher { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.vorher-nachher { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .vorher-nachher figure { margin: 0; display: grid; gap: 4px; }
 .vorher-nachher img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: var(--radius); background: #000; cursor: zoom-in; }
 .vorher-nachher .kein-foto { aspect-ratio: 3 / 4; display: flex; align-items: center; justify-content: center; padding: 8px; }
 .vorher-nachher figcaption { text-align: center; font-weight: 600; font-size: 15px; color: var(--text-2); }
 .foto-gross { cursor: zoom-in; }
+/* Weitere Fotos eines Mangels klein unter dem ersten */
+.foto-streifen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.foto-streifen img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #e3e7e5; cursor: zoom-in; }
+.vorher-nachher figure { align-content: start; }
+.vorher-nachher .foto-streifen { grid-template-columns: repeat(2, 1fr); }
+.vorher-nachher .foto-streifen img { aspect-ratio: 1; border-radius: 8px; background: #e3e7e5; }
 
 .foto-voll {
   position: fixed;

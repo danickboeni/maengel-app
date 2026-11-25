@@ -33,3 +33,6 @@ export const POSITIONSARTEN = [
 ];
 
 export const MAX_FOTOS_POSITION = 5;
+
+// Höchstzahl Fotos pro Mangel, je für «vorher» und «nachher»
+export const MAX_FOTOS_MANGEL = 5;

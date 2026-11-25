@@ -386,15 +386,20 @@ export async function berichtErstellen(platz, { auswahl = 'offen', mitFotos = tr
       meldung(`Detailpläne${mitFotos ? ' und Fotos' : ''} (${i}/${nummeriert.length}) …`);
       const erledigt = istErledigt(m);
       const farbe = punkte[nr - 1].farbe;
+      const fotoIds = db.fotoListen(m);
+      const holen = (ids) => Promise.all(ids.map((id) => db.holen('fotos', id))).then((l) => l.filter(Boolean));
       const [detail, vorher, nachher] = await Promise.all([
         planZeichnen({ zentrum: m, zentrumEinbeziehen: false, punkte: [{ lat: m.lat, lng: m.lng, nr, farbe }], ...DETAIL }),
-        mitFotos && m.fotoId ? db.holen('fotos', m.fotoId) : null,
-        mitFotos && erledigt && m.fotoNachherId ? db.holen('fotos', m.fotoNachherId) : null,
+        mitFotos ? holen(fotoIds.vorher) : [],
+        mitFotos && erledigt ? holen(fotoIds.nachher) : [],
       ]);
+      // Titel unter den Fotos: «Foto» oder «Vorher»/«Nachher», bei mehreren mit Nummer
+      const titel = (name, i, n) => (n > 1 ? `${name} ${i + 1}` : name);
+      const vorherName = nachher.length ? 'Vorher' : 'Foto';
       const bilder = [
         { daten: detail.bild, verh: detail.seitenverhaeltnis, titel: 'Lage', alias: `detail-${m.id}`, rahmen: true },
-        ...(vorher ? [fotoBild(vorher, nachher ? 'Vorher' : 'Foto')] : []),
-        ...(nachher ? [fotoBild(nachher, 'Nachher')] : []),
+        ...vorher.map((f, j) => fotoBild(f, titel(vorherName, j, vorher.length))),
+        ...nachher.map((f, j) => fotoBild(f, titel('Nachher', j, nachher.length))),
       ];
       doc.setFontSize(10);
       const textZeilen = [

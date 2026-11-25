@@ -19,6 +19,12 @@ Mitarbeitende erfassen Mängel und Schadstellen auf Sportplätzen mit Foto und g
 - **PDF-Bericht pro Platz:** Plan mit Punkten, Fotos, Liste.
 - **Sicherung:** Export/Import aller Daten als Datei; App erinnert regelmässig daran.
 
+## Erweiterung: Mehrere Fotos pro Mangel (freigegeben am 25.11.2026)
+- Bis 5 Fotos pro Mangel und bis 5 Fotos «nachher» beim Erledigt-Melden; aufnehmen (einzeln, mehrmals) oder mehrere aus der Galerie.
+- Ansicht: erstes Foto gross, weitere klein darunter; bei erledigten Mängeln Spalten «Vorher» und «Nachher». Liste: erstes Foto mit Anzahl.
+- PDF-Bericht: alle Fotos pro Mangel («Vorher 1, 2 …»).
+- Bestehende Mängel: das bisherige Einzelfoto wird Foto 1. Sicherung ab Format 4; ältere App-Versionen lehnen sie ab, damit keine Fotos verloren gehen.
+
 ## Erweiterung: Offerte aufnehmen (freigegeben am 20.11.2026)
 - **Startbildschirm** mit zwei Wegen: «Mängel erfassen» und «Offerte aufnehmen».
 - **Offerte:** Titel, Kunde (Auftraggeber, Ansprechperson, Telefon, E-Mail), Ort und Lage auf dem Luftbild (optional von einem Platz übernommen), Datum der Begehung, Notiz, Status offen/abgeschlossen.
@@ -42,7 +48,7 @@ Mitarbeitende erfassen Mängel und Schadstellen auf Sportplätzen mit Foto und g
 - **Ausgabe:** Browserdruck / PDF mit Gesamtplan, Lagemassen, Detailblatt pro Feld zum Einmessen und Mengen; dazu DXF, SVG und CSV.
 - **Bedienung:** voll am PC und Tablet. Auf dem Handy nur ansehen (Plan, Warnungen, Mengen, Druck).
 - **Aufbau der Oberfläche:** Kopfzeile in einer Zeile mit den Menüs «Ansicht» (Anzeige-Schalter, Einrasten, Fang), «Ausgabe» (Plan als Datei, Druck, DXF, SVG, CSV) und «?» (Bedienung). Links einklappbare Abschnitte 1 · Platz, 2 · CAD-Unterlage, 3 · Feld hinzufügen, Felder im Plan (Zustand pro Gerät gemerkt). Rechts im Reiter «Feld» Gruppen Masse, Lage, Linien, Optionen; Duplizieren und Löschen getrennt unten.
-- Pläne liegen in IndexedDB (Store `markierungsplaene`) und sind Teil der Sicherung (Format 3). Einzelne Pläne lassen sich zusätzlich als Datei speichern und öffnen.
+- Pläne liegen in IndexedDB (Store `markierungsplaene`) und sind Teil der Sicherung (ab Format 3). Einzelne Pläne lassen sich zusätzlich als Datei speichern und öffnen.
 - Annahmen ohne Quelle sind in der App gekennzeichnet (z. B. Kugelstoss-Masse, Tiefe der Technischen Zone).
 
 ## Technik

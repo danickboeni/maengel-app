@@ -2,7 +2,9 @@
 import * as db from './db.js';
 
 // Format 1: Plätze und Mängel. Format 2: zusätzlich Offerten und Positionen. Format 3: zusätzlich Markierungspläne.
-const FORMAT = 3;
+// Format 4: Mängel mit mehreren Fotos (fotoIds / fotoNachherIds). Ältere App-Versionen kennen das nicht
+// und würden die weiteren Fotos beim Einlesen löschen – darum lehnen sie Format 4 ab.
+const FORMAT = 4;
 const TAG = 24 * 60 * 60 * 1000;
 export const ERINNERUNG_TAGE = 7;
 
